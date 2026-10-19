@@ -1,0 +1,82 @@
+[
+ {
+  "id": "fx03",
+  "thesis": {
+   "title": "Nurse staffing ratios and patient safety outcomes in district hospitals",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Medicine",
+   "geographic_focus": "Sub-Saharan Africa",
+   "objectives": [
+    "To examine nurse staffing ratios and patient safety outcomes in district hospitals"
+   ],
+   "questions": [
+    "What explains nurse staffing ratios and patient safety outcomes?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 3,
+   "title": "Research Methodology",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "3.1",
+     "title": "Research Design",
+     "pages": 5
+    },
+    {
+     "number": "3.2",
+     "title": "Sampling",
+     "pages": 5
+    },
+    {
+     "number": "3.3",
+     "title": "Data Analysis",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx06",
+  "thesis": {
+   "title": "Structural health monitoring of bridges with low-cost sensor networks",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Engineering",
+   "geographic_focus": "Global",
+   "objectives": [
+    "To examine structural health monitoring of bridges with low-cost sensor networks"
+   ],
+   "questions": [
+    "What explains structural health monitoring of bridges with low-cost sensor networks?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 2,
+   "title": "Literature Review",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "2.1",
+     "title": "Sensor Technologies",
+     "pages": 5
+    },
+    {
+     "number": "2.2",
+     "title": "Damage Detection Methods",
+     "pages": 5
+    },
+    {
+     "number": "2.3",
+     "title": "Research Gaps",
+     "pages": 5
+    }
+   ]
+  }
+ }
+]

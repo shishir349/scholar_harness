@@ -1,0 +1,42 @@
+[
+ {
+  "id": "fx02",
+  "thesis": {
+   "title": "Employee engagement and retail store performance in Indian SMEs",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Mixed methods",
+   "domain": "Business, Management and Accounting",
+   "geographic_focus": "India",
+   "objectives": [
+    "To examine employee engagement and retail store performance in indian smes"
+   ],
+   "questions": [
+    "What explains employee engagement and retail store performance?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 2,
+   "title": "Literature Review",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "2.1",
+     "title": "Engagement Theory",
+     "pages": 5
+    },
+    {
+     "number": "2.2",
+     "title": "Retail Performance",
+     "pages": 5
+    },
+    {
+     "number": "2.3",
+     "title": "Gaps in the Literature",
+     "pages": 5
+    }
+   ]
+  }
+ }
+]

@@ -1,0 +1,11 @@
+.venv/
+.env
+data/raw/
+data/candidates/
+data/corpus.db*
+eval/out/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/

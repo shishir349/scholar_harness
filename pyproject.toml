@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scholar-harness"
+version = "0.1.0"
+description = "Reference corpus, agentic sources and validators for Acdyon Scholar"
+requires-python = ">=3.12"
+dependencies = [
+  "langgraph==1.2.12",
+  "langchain-anthropic==1.7.2",
+  "langchain-core==1.6.3",
+  "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+# corpus build only (PyMuPDF is AGPL: never part of the runtime image)
+corpus = ["pymupdf4llm==1.28.2"]
+dev = ["pytest==9.1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+harness = ["prompts/profiles.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

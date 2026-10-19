@@ -1,0 +1,402 @@
+[
+ {
+  "id": "fx01",
+  "thesis": {
+   "title": "Machine learning for early detection of software defects",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Computer Science",
+   "geographic_focus": "Global",
+   "objectives": [
+    "To examine machine learning for early detection of software defects"
+   ],
+   "questions": [
+    "What explains machine learning for early detection of software defects?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 1,
+   "title": "Introduction",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "1.1",
+     "title": "Background",
+     "pages": 5
+    },
+    {
+     "number": "1.2",
+     "title": "Problem Statement",
+     "pages": 5
+    },
+    {
+     "number": "1.3",
+     "title": "Research Aim",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx02",
+  "thesis": {
+   "title": "Employee engagement and retail store performance in Indian SMEs",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Mixed methods",
+   "domain": "Business, Management and Accounting",
+   "geographic_focus": "India",
+   "objectives": [
+    "To examine employee engagement and retail store performance in indian smes"
+   ],
+   "questions": [
+    "What explains employee engagement and retail store performance?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 2,
+   "title": "Literature Review",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "2.1",
+     "title": "Engagement Theory",
+     "pages": 5
+    },
+    {
+     "number": "2.2",
+     "title": "Retail Performance",
+     "pages": 5
+    },
+    {
+     "number": "2.3",
+     "title": "Gaps in the Literature",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx03",
+  "thesis": {
+   "title": "Nurse staffing ratios and patient safety outcomes in district hospitals",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Medicine",
+   "geographic_focus": "Sub-Saharan Africa",
+   "objectives": [
+    "To examine nurse staffing ratios and patient safety outcomes in district hospitals"
+   ],
+   "questions": [
+    "What explains nurse staffing ratios and patient safety outcomes?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 3,
+   "title": "Research Methodology",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "3.1",
+     "title": "Research Design",
+     "pages": 5
+    },
+    {
+     "number": "3.2",
+     "title": "Sampling",
+     "pages": 5
+    },
+    {
+     "number": "3.3",
+     "title": "Data Analysis",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx04",
+  "thesis": {
+   "title": "Social media use and civic participation among young adults",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Qualitative",
+   "domain": "Social Sciences",
+   "geographic_focus": "United Kingdom",
+   "objectives": [
+    "To examine social media use and civic participation among young adults"
+   ],
+   "questions": [
+    "What explains social media use and civic participation among young adults?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 5,
+   "title": "Discussion",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "5.1",
+     "title": "Interpreting the Themes",
+     "pages": 5
+    },
+    {
+     "number": "5.2",
+     "title": "Relation to Prior Work",
+     "pages": 5
+    },
+    {
+     "number": "5.3",
+     "title": "Implications",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx05",
+  "thesis": {
+   "title": "Mindfulness training and academic stress in undergraduates",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Psychology",
+   "geographic_focus": "United States",
+   "objectives": [
+    "To examine mindfulness training and academic stress in undergraduates"
+   ],
+   "questions": [
+    "What explains mindfulness training and academic stress?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 1,
+   "title": "Introduction",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "1.1",
+     "title": "Background",
+     "pages": 5
+    },
+    {
+     "number": "1.2",
+     "title": "Rationale",
+     "pages": 5
+    },
+    {
+     "number": "1.3",
+     "title": "Research Questions",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx06",
+  "thesis": {
+   "title": "Structural health monitoring of bridges with low-cost sensor networks",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Engineering",
+   "geographic_focus": "Global",
+   "objectives": [
+    "To examine structural health monitoring of bridges with low-cost sensor networks"
+   ],
+   "questions": [
+    "What explains structural health monitoring of bridges with low-cost sensor networks?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 2,
+   "title": "Literature Review",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "2.1",
+     "title": "Sensor Technologies",
+     "pages": 5
+    },
+    {
+     "number": "2.2",
+     "title": "Damage Detection Methods",
+     "pages": 5
+    },
+    {
+     "number": "2.3",
+     "title": "Research Gaps",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx07",
+  "thesis": {
+   "title": "Urban green space and heat island mitigation in tropical cities",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Mixed methods",
+   "domain": "Environmental Science",
+   "geographic_focus": "Southeast Asia",
+   "objectives": [
+    "To examine urban green space and heat island mitigation in tropical cities"
+   ],
+   "questions": [
+    "What explains urban green space and heat island mitigation?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 3,
+   "title": "Research Methodology",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "3.1",
+     "title": "Study Areas",
+     "pages": 5
+    },
+    {
+     "number": "3.2",
+     "title": "Data Collection",
+     "pages": 5
+    },
+    {
+     "number": "3.3",
+     "title": "Validity and Reliability",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx08",
+  "thesis": {
+   "title": "Financial inclusion and household savings behaviour",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Quantitative",
+   "domain": "Economics, Econometrics and Finance",
+   "geographic_focus": "India",
+   "objectives": [
+    "To examine financial inclusion and household savings behaviour"
+   ],
+   "questions": [
+    "What explains financial inclusion and household savings behaviour?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 5,
+   "title": "Discussion",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "5.1",
+     "title": "Main Results",
+     "pages": 5
+    },
+    {
+     "number": "5.2",
+     "title": "Comparison with Earlier Studies",
+     "pages": 5
+    },
+    {
+     "number": "5.3",
+     "title": "Policy Implications",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx09",
+  "thesis": {
+   "title": "Memory and place in postcolonial urban fiction",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Qualitative",
+   "domain": "Arts and Humanities",
+   "geographic_focus": "South Asia",
+   "objectives": [
+    "To examine memory and place in postcolonial urban fiction"
+   ],
+   "questions": [
+    "What explains memory and place?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 1,
+   "title": "Introduction",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "1.1",
+     "title": "Background",
+     "pages": 5
+    },
+    {
+     "number": "1.2",
+     "title": "Scope of the Study",
+     "pages": 5
+    },
+    {
+     "number": "1.3",
+     "title": "Thesis Outline",
+     "pages": 5
+    }
+   ]
+  }
+ },
+ {
+  "id": "fx10",
+  "thesis": {
+   "title": "Drip irrigation adoption and smallholder yield in semi-arid regions",
+   "university": "Example University",
+   "programme": "PhD",
+   "methodology": "Mixed methods",
+   "domain": "Agricultural and Biological Sciences",
+   "geographic_focus": "East Africa",
+   "objectives": [
+    "To examine drip irrigation adoption and smallholder yield in semi-arid regions"
+   ],
+   "questions": [
+    "What explains drip irrigation adoption and smallholder yield?"
+   ]
+  },
+  "references": [],
+  "chapter": {
+   "chapter_number": 2,
+   "title": "Literature Review",
+   "estimated_pages": 15,
+   "sections": [
+    {
+     "number": "2.1",
+     "title": "Irrigation Technologies",
+     "pages": 5
+    },
+    {
+     "number": "2.2",
+     "title": "Adoption Determinants",
+     "pages": 5
+    },
+    {
+     "number": "2.3",
+     "title": "Research Gaps",
+     "pages": 5
+    }
+   ]
+  }
+ }
+]

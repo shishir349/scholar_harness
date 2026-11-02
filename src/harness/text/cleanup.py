@@ -168,6 +168,15 @@ _THAT_AFTER = re.compile(r"\b(found|finds?|shows?|showed|suggest(?:s|ed)?|indica
                          r"(?=(?:the|these|those|it|its|they|their|there|such|most|many|some|no|all|each|both|we|I|our|my)\b)")
 EXAMPLE = re.compile(r"\b(?:for example|for instance|such as|e\.g\.)", re.I)
 
+# Plain-word swaps: generic academic words and phrases with a shorter plain twin. Domain terms are never listed.
+PLAIN = {"utilize": "use", "utilizes": "uses", "utilized": "used", "utilizing": "using", "utilization": "use", "demonstrate": "show",
+         "demonstrates": "shows", "demonstrated": "showed", "numerous": "many", "commence": "begin", "facilitate": "help",
+         "facilitates": "helps", "subsequently": "later", "additionally": "also", "furthermore": "also", "approximately": "about",
+         "in order to": "to", "a number of": "several", "due to the fact that": "because", "in the event that": "if",
+         "with regard to": "on", "with respect to": "on", "prior to": "before", "in addition to": "besides", "endeavour": "try",
+         "ascertain": "find out", "obtain": "get", "obtained": "got", "sufficient": "enough", "assist": "help", "assists": "helps"}
+_PLAIN = re.compile(r"(?<![\w-])(" + "|".join(sorted(map(re.escape, PLAIN), key=len, reverse=True)) + r")(?![\w-])", re.I)
+
 
 def _cap(s: str) -> str:
     return s[:1].upper() + s[1:]
@@ -302,11 +311,26 @@ def thin_that(chunks: dict, per_1000_limit: float) -> tuple[dict, int]:
     return _each(chunks, one)
 
 
+def plain_words(chunks: dict) -> tuple[dict, int]:
+    """'utilize' -> 'use', 'in order to' -> 'to': real theses average 5.25 letters a word, AI drafts 5.97. Text inside quotation
+    marks is left alone, and a swap that starts a sentence keeps its capital."""
+    def sub(m):
+        new = PLAIN[m.group(1).lower()]
+        return _cap(new) if m.group(1)[:1].isupper() else new
+
+    def one(p):
+        if '"' in p or "“" in p:
+            return p, 0
+        new, n = _PLAIN.subn(sub, p)
+        return new, n
+    return _each(chunks, one)
+
+
 def polish(chunks: dict, that_limit: float | None = None) -> tuple[dict, dict]:
     """All free wording rewrites, in order. -> (chunks, {name: count})."""
     counts = {}
     for name, fn in (("stance", strip_stance), ("what", what_cleft), ("report", report_to_cite), ("closer", drop_closers),
-                     ("booster", drop_boosters)):
+                     ("booster", drop_boosters), ("plain", plain_words)):
         chunks, counts[name] = fn(chunks)
     if that_limit:
         chunks, counts["that"] = thin_that(chunks, that_limit)

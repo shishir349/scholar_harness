@@ -1,6 +1,6 @@
 """CLI contract (the future Node adapter talks to this).
 
-    python -m harness.run research|write-section|audit
+    python -m harness.run research|write-section|audit|refine
 
 Reads ONE JSON object on stdin. Writes NDJSON events on stdout (one JSON per line, flushed), logs on stderr.
 Exit: 0 ok, 2 bad request, 1 failure. Stateless: no server, nothing kept between calls.
@@ -13,6 +13,7 @@ import sys
 from . import config, llm
 from .corpus import openalex, store
 from .graph import Deps, write_section
+from .refine import refine
 from .prompts.sections import detect_profile
 from .sources import agent as source_agent
 from .sources.verifier import audit_chapter
@@ -113,7 +114,20 @@ def cmd_audit(req: dict) -> None:
            "claims": {"stats": cit["stats"], "checks": cit["claim_checks"]}, "usage": spend.summary()})
 
 
-COMMANDS = {"research": cmd_research, "write-section": cmd_write_section, "audit": cmd_audit}
+def cmd_refine(req: dict) -> None:
+    """{text, flags?:{tier:'sonnet'|'haiku', max_words, polish}} -> one 'refined' event. Any chunk the gate rejects keeps its original."""
+    _need(req, text=str)
+    flags = req.get("flags") or {}
+    tier = flags.get("tier", "sonnet")
+    if tier not in ("sonnet", "haiku"):
+        raise BadRequest("flags.tier must be 'sonnet' or 'haiku'")
+    spend = Spend()
+    _emit({"type": "status", "value": "refining"})
+    res = refine(req["text"], spend=spend, tier=tier, max_words=int(flags.get("max_words", 350)), polish=bool(flags.get("polish", True)))
+    _emit({"type": "refined", **res, "usage": spend.summary()})
+
+
+COMMANDS = {"research": cmd_research, "write-section": cmd_write_section, "audit": cmd_audit, "refine": cmd_refine}
 
 
 def main(argv: list[str] | None = None) -> int:

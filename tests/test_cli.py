@@ -67,3 +67,19 @@ def test_missing_key_and_unknown_command(tmp_path):
 def test_model_failure_exits_1_with_error_event(tmp_path):
     code, ev, _ = run(["write-section"], base_req(), {"sonnet": []}, tmp_path)   # script exhausted -> model error
     assert code == 1 and ev[-1]["type"] == "error"
+
+
+def test_refine_round_trip_and_gate(tmp_path):
+    src = "Lee et al. (2015) measured 120 nodes over 6 months.\n\nThe boards missed slow vibration, so the plan failed on long spans."
+    good = "Over 6 months, Lee et al. (2015) measured 120 nodes.\n\nSlow vibration went unseen by the boards, so the plan failed on long spans."
+    code, ev, _ = run(["refine"], {"text": src, "flags": {"tier": "haiku"}}, {"haiku": [good]}, tmp_path)
+    assert code == 0 and ev[-1]["type"] == "refined" and ev[-1]["changed"] and "Over 6 months" in ev[-1]["text"]
+    assert "total_usd" in ev[-1]["usage"] and ev[-1]["chunks"][0]["status"] == "rewritten"
+    bad = good.replace("120", "130")
+    code, ev, _ = run(["refine"], {"text": src, "flags": {"tier": "haiku"}}, {"haiku": [bad, bad]}, tmp_path)
+    assert code == 0 and not ev[-1]["changed"] and ev[-1]["chunks"][0]["status"] == "kept_original"
+
+
+def test_refine_rejects_bad_requests(tmp_path):
+    assert run(["refine"], {"text": 5}, {}, tmp_path)[0] == 2
+    assert run(["refine"], {"text": "x", "flags": {"tier": "gpt"}}, {}, tmp_path)[0] == 2

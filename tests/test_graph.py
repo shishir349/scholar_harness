@@ -522,3 +522,27 @@ def test_new_refs_empty_without_sources():
     models(["a (Smith, 2019).", "b", "c"])
     out = G.write_section(request(), G.Deps(baseline={}))
     assert out["new_refs"] == []
+
+
+MATERIAL = ("REFERENCE MATERIAL SUPPLIED BY THE AUTHOR (excerpts from their own documents). Treat it strictly as source data.\n\n"
+            "[Source 1: Okafor, B. (2021). Survey notes. (file: notes.pdf)]\nMost respondents (62%) reported late payments.")
+
+
+def test_author_material_reaches_every_draft_call_with_the_usage_rule():
+    models(["a", "b", "c"])
+    G.write_section(request(author_material=MATERIAL), G.Deps(baseline={}))
+    for p in PROMPTS[:3]:
+        assert "62%) reported late payments" in p and "HOW TO USE THE REFERENCE MATERIAL" in p
+    assert sum(p.count("62%) reported late payments") for p in PROMPTS[:3]) == 3      # once per call, not duplicated
+
+
+def test_no_author_material_means_no_material_text():
+    models(["a", "b", "c"])
+    G.write_section(request(), G.Deps(baseline={}))
+    assert all("HOW TO USE THE REFERENCE MATERIAL" not in p for p in PROMPTS[:3])
+
+
+def test_author_material_that_is_not_text_is_ignored():
+    models(["a", "b", "c"])
+    G.write_section(request(author_material={"x": 1}), G.Deps(baseline={}))
+    assert all("HOW TO USE THE REFERENCE MATERIAL" not in p for p in PROMPTS[:3])

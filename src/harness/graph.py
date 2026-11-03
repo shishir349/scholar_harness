@@ -322,6 +322,7 @@ class S(TypedDict, total=False):
     refs: list                # merged library + ledger sources
     ref_lines: list           # APA strings shown to the model
     added_refs: list          # real works the writer cited from its own knowledge, verified and adopted
+    author_material: str      # the author's own uploaded documents, already cut to this section by the caller
     notes: str
     facts: list               # [{text, cite}] figure sentences from this section's sources
     rules: str
@@ -366,10 +367,12 @@ def build_graph(deps: Deps):
         wt, mt = words_target(chapter, section, n_secs)
         profile = P.detect_profile(chapter.get("title"), chapter.get("chapter_number"))
         use_sources = bool(flags.get("sources", True)) and bool(state.get("sources"))
+        material = (state.get("author_material") or "").strip()
         refs = merge_refs(state.get("references") or [], state["sources"]) if use_sources else list(state.get("references") or [])
         return {
             "profile": profile, "words_target": wt, "max_tokens": mt, "refs": refs, "ref_lines": _ref_lines(refs),
-            "notes": source_notes_for(section, state["sources"], state.get("by_section")) if use_sources else "",
+            "notes": "\n\n".join(x for x in (source_notes_for(section, state["sources"], state.get("by_section")) if use_sources else "",
+                                             f"{material}\n\n{MATERIAL_RULES}" if material else "") if x),
             "rules": CITATION_RULES if use_sources else "",
             "facts": (facts_for(section, state["sources"], state.get("by_section")) if use_sources else [])
                      + numbers.structure_facts(state["thesis"], chapter, section, profile["id"]) + numbers.brief_facts(state["thesis"]),
@@ -1064,6 +1067,11 @@ def build_graph(deps: Deps):
     return g.compile()
 
 
+MATERIAL_RULES = ("HOW TO USE THE REFERENCE MATERIAL: build this passage on it. Take its claims, definitions, data, findings and "
+                  "terminology from it and attribute them to the author and year the material gives. Do not state a specific fact, "
+                  "figure or citation that is neither in the material nor in the REFERENCES list. Where the material does not cover "
+                  "a point, say so plainly instead of filling the gap.")
+
 _REF_KEEP = ("authors", "year", "title", "journal", "volume", "issue", "pages", "doi", "url", "type", "apa", "openalex_id")
 
 
@@ -1090,6 +1098,7 @@ def write_section(request: dict, deps: Deps) -> dict:
         "references": request.get("references") or [], "sources": ledger.get("sources") or [],
         "by_section": ledger.get("by_section") or {}, "flags": request.get("flags") or {},
         "n_sections": request.get("n_sections"),
+        "author_material": request["author_material"] if isinstance(request.get("author_material"), str) else "",
     }, config={"recursion_limit": 40})
     c = state["chunks"]
     text = c["open"] + c["mid"] + c["close"]

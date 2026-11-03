@@ -16,7 +16,7 @@ from .sources.tools import _FIGURE, CITATION_RULES, facts_for, merge_refs, sourc
 from .sources.verifier import audit_chapter
 from .spend import BudgetExceeded
 from .text import cleanup, numbers
-from .text.citations import audit_citations, extract_citations, first_author
+from .text.citations import audit_citations, extract_citations, first_author, match_ref
 from .text.jsonparse import parse_json
 from .text.sentences import split_sentences
 from .text.strip import strip_for_style
@@ -1064,6 +1064,23 @@ def build_graph(deps: Deps):
     return g.compile()
 
 
+_REF_KEEP = ("authors", "year", "title", "journal", "volume", "issue", "pages", "doi", "url", "type", "apa", "openalex_id")
+
+
+def _new_refs(text: str, library: list, found: list) -> list[dict]:
+    """Works the text cites that came from research or a lookup, not from the author's own library, so the caller can add
+    them to the bibliography. Without this a cited source would be in the prose but missing from the reference list."""
+    lib = [r for r in (library or []) if isinstance(r, dict)]
+    pool = [r for r in (found or []) if isinstance(r, dict)]
+    out: list[dict] = []
+    for cit in extract_citations(text):
+        ref = match_ref(cit, pool)
+        if ref is None or match_ref(cit, lib) is not None or any(ref is o or ref.get("title") == o.get("title") for o in out):
+            continue
+        out.append({k: ref[k] for k in _REF_KEEP if ref.get(k) is not None})
+    return out
+
+
 def write_section(request: dict, deps: Deps) -> dict:
     """request: {thesis, chapter, section, references, ledger:{sources,by_section}, flags, n_sections?}.
     -> {text, reports, revisions}"""
@@ -1081,5 +1098,8 @@ def write_section(request: dict, deps: Deps) -> dict:
         c, _ = cleanup.drop_repeats(c, [r["abstract"] for r in state.get("refs", []) if isinstance(r, dict) and r.get("abstract")])
         c, _ = cleanup.polish(c, _that_limit(state["profile"]["id"], deps.profile if deps.profile is not None else load_profile()))
         text = _tidy(_glue(c))
+    use_found = bool((request.get("flags") or {}).get("sources", True))
+    found = (ledger.get("sources") or []) if use_found else []
     return {"text": text, "reports": state["reports"], "revisions": state["revisions"],
-            "added_refs": state.get("added_refs", [])}
+            "added_refs": state.get("added_refs", []),
+            "new_refs": _new_refs(text, request.get("references") or [], found + state.get("added_refs", []))}

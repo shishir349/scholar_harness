@@ -504,3 +504,21 @@ def test_chat_passes_temperature_only_when_asked(monkeypatch):
     llm.chat("haiku", temperature=0)
     llm.chat("haiku")
     assert got[0]["temperature"] == 0 and "temperature" not in got[1]
+
+
+def test_new_refs_lists_only_cited_works_that_are_not_in_the_library():
+    other = {**SOURCES[0], "ledger_id": "S2", "openalex_id": "W2", "title": "Unused paper", "year": 2020, "authors": "Jones, K.", "doi": "10.1/j",
+             "apa": "Jones, K. (2020). Unused paper."}
+    owned = {"authors": "Lee, A.", "year": 2018, "title": "Mine", "apa_formatted": "Lee, A. (2018). Mine."}
+    models(["a (Smith, 2019) and (Lee, 2018).", "b", "c"], haiku=['[{"id": 1, "verdict": "SUPPORTED", "reason": "ok"}]'])
+    out = G.write_section(request(references=[owned], flags={"pool": False, "sources": True, "revise": True},
+                                  ledger={"sources": [SOURCES[0], other], "by_section": {GOLD["section"]["number"]: ["S1", "S2"]}}), G.Deps(baseline={}))
+    assert [r["title"] for r in out["new_refs"]] == ["Cloud growth"]          # cited + new; not Jones (uncited), not Lee (already owned)
+    r = out["new_refs"][0]
+    assert r["apa"] == "Smith, J. (2019). Cloud growth." and r["doi"] == "10.1/s" and "abstract" not in r
+
+
+def test_new_refs_empty_without_sources():
+    models(["a (Smith, 2019).", "b", "c"])
+    out = G.write_section(request(), G.Deps(baseline={}))
+    assert out["new_refs"] == []

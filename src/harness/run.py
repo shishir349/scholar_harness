@@ -75,28 +75,32 @@ def _open_db():
     return store.connect(p) if p.exists() else None   # never create an empty corpus by accident
 
 
-def cmd_research(req: dict) -> None:
+def cmd_research(req: dict, emit=_emit) -> None:
     _need(req, thesis=dict, chapter=dict, sections=list)
     spend = Spend()
-    _emit({"type": "status", "value": "researching"})
+    emit({"type": "status", "value": "researching"})
     out = source_agent.research_chapter(req["thesis"], req["chapter"], req["sections"], spend=spend)
     if out is None:
         out = {"sources": [], "by_section": {}, "skipped": "agent_error"}
-    _emit({"type": "ledger", **out, "usage": spend.summary()})
+    emit({"type": "ledger", **out, "usage": spend.summary()})
 
 
-def cmd_write_section(req: dict) -> None:
+def cmd_write_section(req: dict, emit=_emit) -> None:
     _need(req, thesis=dict, chapter=dict, section=dict)
     flags = req.get("flags") or {}
     spend = Spend()
     con = _open_db() if flags.get("pool", False) else None
-    deps = Deps(spend=spend, con=con, fields=_load_fields(con), emit=_emit,
-                lookup=openalex.find_cited_work if openalex.enabled() and flags.get("sources") else None)
-    res = write_section(req, deps)
-    _emit({"type": "section", **res, "usage": spend.summary()})
+    try:
+        deps = Deps(spend=spend, con=con, fields=_load_fields(con), emit=emit,
+                    lookup=openalex.find_cited_work if openalex.enabled() and flags.get("sources") else None)
+        res = write_section(req, deps)
+    finally:
+        if con is not None:
+            con.close()   # the HTTP server is long-lived: never leak a connection per request
+    emit({"type": "section", **res, "usage": spend.summary()})
 
 
-def cmd_audit(req: dict) -> None:
+def cmd_audit(req: dict, emit=_emit) -> None:
     _need(req, content=str, chapter=dict, thesis=dict)
     spend = Spend()
     chapter, thesis = req["chapter"], req["thesis"]
@@ -108,13 +112,13 @@ def cmd_audit(req: dict) -> None:
     structure = check_structure(req["content"], chapter, thesis, ptype)
     cit = audit_chapter(req["content"], [r for r in (req.get("references") or []) if isinstance(r, dict)], spend,
                         verify=bool(req.get("claims", True)))
-    _emit({"type": "audit", "style": style, "structure": structure,
+    emit({"type": "audit", "style": style, "structure": structure,
            "citations": {"matched": len(cit["matched"]), "unmatched": [c["raw"] for c in cit["unmatched"]],
                          "suspicious": cit["suspicious"]},
            "claims": {"stats": cit["stats"], "checks": cit["claim_checks"]}, "usage": spend.summary()})
 
 
-def cmd_refine(req: dict) -> None:
+def cmd_refine(req: dict, emit=_emit) -> None:
     """{text, flags?:{tier:'sonnet'|'haiku', max_words, polish}} -> one 'refined' event. Any chunk the gate rejects keeps its original."""
     _need(req, text=str)
     flags = req.get("flags") or {}
@@ -122,9 +126,9 @@ def cmd_refine(req: dict) -> None:
     if tier not in ("sonnet", "haiku"):
         raise BadRequest("flags.tier must be 'sonnet' or 'haiku'")
     spend = Spend()
-    _emit({"type": "status", "value": "refining"})
+    emit({"type": "status", "value": "refining"})
     res = refine(req["text"], spend=spend, tier=tier, max_words=int(flags.get("max_words", 350)), polish=bool(flags.get("polish", True)))
-    _emit({"type": "refined", **res, "usage": spend.summary()})
+    emit({"type": "refined", **res, "usage": spend.summary()})
 
 
 COMMANDS = {"research": cmd_research, "write-section": cmd_write_section, "audit": cmd_audit, "refine": cmd_refine}

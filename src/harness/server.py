@@ -1,9 +1,10 @@
 """Tiny HTTP wrapper around refine, for Render. Stdlib only.
 
-    GET  /health                    -> {"ok": true}            (no auth, for Render's health check)
+    GET  /health                    -> {"ok": true, "corpus": bool}   (no auth, for Render's health check)
     POST /refine  {text, flags?}    -> same JSON as `harness.run refine` ('refined' event, minus 'type')
+    POST /research | /write-section | /audit  -> the final event of the same `harness.run` command (see docs/node-adapter-contract.md)
     Auth: header  Authorization: Bearer <HARNESS_TOKEN>.  The server refuses to start without HARNESS_TOKEN.
-Stateless. No corpus needed. A section takes tens of seconds (one model call per ~350 words), so the caller sets a long timeout.
+Stateless. The corpus (optional) is built at boot by corpus/boot.py. A section takes tens of seconds (one model call per ~350 words), so the caller sets a long timeout.
 """
 import hmac
 import json
@@ -12,7 +13,8 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config
+from . import config, run
+from .corpus import boot
 from .refine import refine
 from .spend import BudgetExceeded, Spend
 
@@ -35,6 +37,19 @@ def run_refine(req: dict) -> dict:
     return {**res, "usage": spend.summary()}
 
 
+def run_cmd(name: str, req: dict) -> dict:
+    """Run a CLI command in-process, return its last event. BadRequest -> ValueError (400)."""
+    events: list[dict] = []
+    try:
+        run.COMMANDS[name](req, emit=events.append)
+    except run.BadRequest as e:
+        raise ValueError(str(e)) from e
+    return events[-1]
+
+
+ROUTES = {"/refine": run_refine, **{f"/{n}": (lambda req, n=n: run_cmd(n, req)) for n in ("research", "write-section", "audit")}}
+
+
 class Handler(BaseHTTPRequestHandler):
     token = ""
 
@@ -52,11 +67,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if self.path == "/health":
-            return self._send(200, {"ok": True})
+            return self._send(200, {"ok": True, "corpus": config.db_path().exists()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
-        if self.path != "/refine":
+        if self.path not in ROUTES:
             return self._send(404, {"error": "not found"})
         if not self._authed():
             return self._send(401, {"error": "unauthorized"})
@@ -75,14 +90,14 @@ class Handler(BaseHTTPRequestHandler):
         if not SLOTS.acquire(blocking=False):
             return self._send(429, {"error": "busy"})
         try:
-            self._send(200, run_refine(req))
+            self._send(200, ROUTES[self.path](req))
         except ValueError as e:
             self._send(400, {"error": str(e)})
         except BudgetExceeded:
             self._send(402, {"error": "per-request budget reached"})
         except Exception:  # noqa: BLE001 - never leak internals; the caller falls back to its own text
-            log.exception("refine failed")
-            self._send(500, {"error": "refine failed"})
+            log.exception("%s failed", self.path)
+            self._send(500, {"error": "request failed"})
         finally:
             SLOTS.release()
 
@@ -99,8 +114,9 @@ def make_server(token: str, port: int, host: str = "0.0.0.0") -> ThreadingHTTPSe
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    boot.ensure_corpus(config.get("HARNESS_CORPUS_URL"), config.get("HARNESS_CORPUS_SHA256"), config.db_path())
     srv = make_server(config.get("HARNESS_TOKEN"), int(os.environ.get("PORT", "8000")))
-    log.info("harness refine server on :%s", srv.server_port)
+    log.info("harness server on :%s", srv.server_port)
     srv.serve_forever()
 
 

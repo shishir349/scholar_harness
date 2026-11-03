@@ -9,3 +9,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 build/
+
+# corpus pack = third-party thesis text, never commit
+*.jsonl.gz
+corpus-pack*

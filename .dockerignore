@@ -1,7 +1,10 @@
 .venv
 .env
 .git
-data
+data/*
+!data/style_baseline.json
+!data/style_profile.json
+!data/fields.selected.json
 eval
 build
 tests
@@ -9,3 +12,4 @@ docs
 tasks
 __pycache__
 *.egg-info
+*.jsonl.gz

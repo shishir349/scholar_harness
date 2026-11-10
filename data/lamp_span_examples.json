@@ -1,0 +1,327 @@
+[
+ {
+  "section_type": "introduction",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "Given the current pace of the expansion of behavioural policy, it is clear that there is a real need to subject this issue to comprehensive and sophisticated philosophical analysis, in order to find ethical principles to guide the current practice and future development of nudging.",
+   "This thesis contributes to this effort."
+  ],
+  "lengths": [
+   45,
+   6
+  ],
+  "thesis_id": 90
+ },
+ {
+  "section_type": "introduction",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "In natural language processing as well as in many areas of machine learning, the standard way to train a model is to annotate a large number of examples that are then provided to the model, which learns a function that maps from inputs to outputs.",
+   "This is known as supervised learning."
+  ],
+  "lengths": [
+   45,
+   6
+  ],
+  "thesis_id": 30
+ },
+ {
+  "section_type": "introduction",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "This is where the computational approach can make a real contribution: it identifies precise computational properties that hold of the observed patterns but not of the unattested ones and therefore establishes clear predictions for what patterns will and will not be found cross-linguistically.",
+   "This idea is not novel."
+  ],
+  "lengths": [
+   43,
+   5
+  ],
+  "thesis_id": 101
+ },
+ {
+  "section_type": "introduction",
+  "kind": "abrupt_close",
+  "sentences": [
+   "Air pollution costs are related to other externalities; for instance, as a consequence of congestion, corresponding to the average yearly delay per car, average additional fuel consumption per person per year has escalated from 4 Gallons in 1982 to 19 Gallons in 2014 (Schrank et al., 2015).",
+   "The data is averaged from 471 US urban areas."
+  ],
+  "lengths": [
+   47,
+   9
+  ],
+  "thesis_id": 186
+ },
+ {
+  "section_type": "introduction",
+  "kind": "abrupt_close",
+  "sentences": [
+   "This inertia is caused by different barriers to organisational change, like insufficient top management involvement, job security concerns, power struggles, and agency problems (Burnes, 1996; Kegan and Lahey, 2001; Kotter, 2007) that also apply to business model innovation as a particularly comprehensive and complex change effort.",
+   "An overview of some of the challenges is provided in Table 2."
+  ],
+  "lengths": [
+   46,
+   12
+  ],
+  "thesis_id": 159
+ },
+ {
+  "section_type": "literature_review",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "It is not, however, obvious how one might claim both that genetic ties are important enough to ground a right to know a gamete donor, while maintaining that there is nothing special or better about the kinds of information or relationships that rely on genetics.",
+   "I discuss this issue in Chapter 4."
+  ],
+  "lengths": [
+   45,
+   7
+  ],
+  "thesis_id": 214
+ },
+ {
+  "section_type": "literature_review",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "Ginzburg, et al. (2010) conducted a study, with the objective of assisting in the training and professional development of instructors, allowing them to acquire the skills that make them competent online instructors, masters of instructional design, effective online communicators, and appropriate users of available technology.",
+   "The study used a sample of twenty-three faculty members."
+  ],
+  "lengths": [
+   45,
+   9
+  ],
+  "thesis_id": 37
+ },
+ {
+  "section_type": "literature_review",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "However, today marketing is not a single isolated phenomenon that a certain enterprise can separate itself and only depend on its efficiency, rather, a number of factors influence its performance that demands to take into account consideration when decision is made.",
+   "Hence, this approach becomes less important."
+  ],
+  "lengths": [
+   41,
+   6
+  ],
+  "thesis_id": 111
+ },
+ {
+  "section_type": "literature_review",
+  "kind": "abrupt_close",
+  "sentences": [
+   "The main purpose of this project was to help those poor people living in a very deplorable settlement, make the capital city and other major cities attractive (Amponsah, 2010), and also to create employment, especially for women (Klutse, 2009).",
+   "However, the project was abandoned soon after it started (Klutse, 2009)."
+  ],
+  "lengths": [
+   39,
+   11
+  ],
+  "thesis_id": 35
+ },
+ {
+  "section_type": "literature_review",
+  "kind": "abrupt_close",
+  "sentences": [
+   "Section 2.8 discusses limitations of existing hybrid frameworks followed by Section 2.9 which establishes the main research gaps: no reported literature on use of hybrid simulation in healthcare and the absence of a generic framework for hybrid simulation.",
+   "Finally Section 2.10 provides a brief summary of the chapter."
+  ],
+  "lengths": [
+   38,
+   10
+  ],
+  "thesis_id": 63
+ },
+ {
+  "section_type": "methodology",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "Similarly, NASA and Pratt & Whitney worked together on the precursor of the Geared Turbofan called Advanced Ducted Propulsor (ADP) and investigated experimentally the broadband noise of two rotors (called Fan1 and Fan2) having different rotation speeds for the same pressure ratio and blade count.",
+   "The ADP fan produced a pressure ratio of 1.3."
+  ],
+  "lengths": [
+   45,
+   9
+  ],
+  "thesis_id": 195
+ },
+ {
+  "section_type": "methodology",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "This can be seen as a prioritizing mechanism which balances the LCPs of all households, e.g. households with a LCP that slightly deviates from the nominal have a higher probability to change their LCP to resolve the problems in an unbalanced situation.",
+   "The presented method is described in Algorithm 6."
+  ],
+  "lengths": [
+   42,
+   8
+  ],
+  "thesis_id": 53
+ },
+ {
+  "section_type": "methodology",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "In other words, many of these studies may well have been situated in a room which is also used for teaching purposes, but they may not represent the ways in which an authentic class would behave and respond to TR (Nassaji, 2012).",
+   "An exception is Lynch and Maclean (2000; 2001)."
+  ],
+  "lengths": [
+   42,
+   8
+  ],
+  "thesis_id": 179
+ },
+ {
+  "section_type": "methodology",
+  "kind": "abrupt_close",
+  "sentences": [
+   "This can be seen as a prioritizing mechanism which balances the LCPs of all households, e.g. households with a LCP that slightly deviates from the nominal have a higher probability to change their LCP to resolve the problems in an unbalanced situation.",
+   "The presented method is described in Algorithm 6."
+  ],
+  "lengths": [
+   42,
+   8
+  ],
+  "thesis_id": 53
+ },
+ {
+  "section_type": "methodology",
+  "kind": "abrupt_close",
+  "sentences": [
+   "Case study is an extensive examination of a single instance of a phenomenon of interest (Hussey & Hussey, 1998), an intensive investigation into a single case, and it is often complex in nature (Stake, 1995).",
+   "Thus, case study is contextspecific (Saunders et al., 2012)."
+  ],
+  "lengths": [
+   35,
+   9
+  ],
+  "thesis_id": 35
+ },
+ {
+  "section_type": "findings",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "It indicates that, even though we train only on the output of the model, our method does much more than reordering the elements in the beam and allows the model to find correct solutions that were not assigned a high probability by the baseline model.",
+   "See Table 5.6 for more results."
+  ],
+  "lengths": [
+   45,
+   6
+  ],
+  "thesis_id": 32
+ },
+ {
+  "section_type": "findings",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "Specifically, we selected the utterances of the first three subjects for the first two trials and for letters A to Q and constructed three views as follows; view 1 contained the audio signal by stacking the relevant information for all considered subjects, trials and letters.",
+   "Similarly, view 2 contained the video signal."
+  ],
+  "lengths": [
+   45,
+   7
+  ],
+  "thesis_id": 28
+ },
+ {
+  "section_type": "findings",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "The centers of the different survey volumes are marked with a square, if the survey volume is centered on a spiral arm ( `S8` and `S5` ), or with a circle, if the volume is centered on an inter-arm region ( `I8` and `I5` ).",
+   "The coordinates are summarized in Table 3.1."
+  ],
+  "lengths": [
+   45,
+   7
+  ],
+  "thesis_id": 96
+ },
+ {
+  "section_type": "findings",
+  "kind": "abrupt_close",
+  "sentences": [
+   "If for instance, stage 1 involves being load shed 3 times for 2 hours at a time over the 4 day period, the percentage of time that an individual retailer will experience load shedding during the 4 day period for stage 1 load shedding can be calculated.",
+   "The details are shown in Equation 5."
+  ],
+  "lengths": [
+   47,
+   7
+  ],
+  "thesis_id": 123
+ },
+ {
+  "section_type": "findings",
+  "kind": "abrupt_close",
+  "sentences": [
+   "The value of opportunism and disruption is based on the belief that it is valuable for a designer to seek and utilise new opportunities in the field of game design (such as new technology or user groups) or even search for areas that could be overtaken with new inventions.",
+   "All of these values are listed in Table 3."
+  ],
+  "lengths": [
+   49,
+   9
+  ],
+  "thesis_id": 104
+ },
+ {
+  "section_type": "discussion",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "The corpus analysis showed that in general, the distribution of Farsi relative clauses is very similar to that of other languages like English, Dutch, and German, but there is a clear distribution of resumptive pronouns depending on the restrictiveness.",
+   "This will be discussed in Paragraph 8.3."
+  ],
+  "lengths": [
+   39,
+   7
+  ],
+  "thesis_id": 187
+ },
+ {
+  "section_type": "discussion",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "These findings outlined in the current dissertation instigates the need for more clinical linguistics research as well as the development of language tests for diagnosis and treatments for Akan speakers with language pathologies, particularly for speakers with agrammatic aphasia.",
+   "Chapter 5 concluded with recommendations for future research."
+  ],
+  "lengths": [
+   39,
+   8
+  ],
+  "thesis_id": 20
+ },
+ {
+  "section_type": "discussion",
+  "kind": "long_then_blunt",
+  "sentences": [
+   "Reasons for more common presence of low IQ in our cohort could be that our DMD children are deprived from sources due to their, on average, low socio-economic status; have co-existing malnutrition; lack schooling from young age; and lack cognitive stimulation and motivation.",
+   "The majority are dropouts due to motor disabilities."
+  ],
+  "lengths": [
+   43,
+   8
+  ],
+  "thesis_id": 143
+ },
+ {
+  "section_type": "discussion",
+  "kind": "abrupt_close",
+  "sentences": [
+   "The corpus analysis showed that in general, the distribution of Farsi relative clauses is very similar to that of other languages like English, Dutch, and German, but there is a clear distribution of resumptive pronouns depending on the restrictiveness.",
+   "This will be discussed in Paragraph 8.3."
+  ],
+  "lengths": [
+   39,
+   7
+  ],
+  "thesis_id": 187
+ },
+ {
+  "section_type": "discussion",
+  "kind": "abrupt_close",
+  "sentences": [
+   "These findings outlined in the current dissertation instigates the need for more clinical linguistics research as well as the development of language tests for diagnosis and treatments for Akan speakers with language pathologies, particularly for speakers with agrammatic aphasia.",
+   "Chapter 5 concluded with recommendations for future research."
+  ],
+  "lengths": [
+   39,
+   8
+  ],
+  "thesis_id": 20
+ }
+]

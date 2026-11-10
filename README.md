@@ -26,6 +26,7 @@ python -m harness.corpus.score        # 4. rubric + score, 5 exemplars + 1 holdo
                                       #    [review manifest, set "exclude": true, rerun with --reselect: gate G2]
 python -m harness.corpus.ingest       # 5. data/corpus.db (FTS5) + data/style_baseline.json
 python eval/ab.py                     # 6. A/B report -> eval/out/report.md   [gate G3]
+python -m harness.corpus.skeletons   # 7. data/human_skeletons.json: paragraph/sentence-shape blueprints (no text) that graph._para_plan hands the writer
 ```
 `data/raw/`, `data/candidates/`, `data/corpus.db` are gitignored (copyrighted text). Commit `fields.selected.json`,
 `manifest.json`, `style_baseline.json`.

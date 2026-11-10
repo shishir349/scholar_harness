@@ -6,9 +6,11 @@ from functools import lru_cache
 from pathlib import Path
 
 from .. import config
+from ..text.sentences import split_sentences
 from ..text.strip import headings_and_text, strip_for_style
 from .features import FEATURES, ONE_SIDED_HIGH, style_features
 
+FLAT_STD = 6.0       # same floor corpus/skeletons.py uses for a flat paragraph
 BASELINE_PATH = config.DATA / "style_baseline.json"
 
 
@@ -149,4 +151,22 @@ def split_chapter_by_sections(content: str, toc_sections: list[dict] | None) -> 
     for k, (i, num, title) in enumerate(starts):
         end = starts[k + 1][0] if k + 1 < len(starts) else len(lines)
         out.append({"number": num, "title": title, "text": strip_for_style("\n".join(lines[i + 1:end]))})
+    return out
+
+
+def burst_flags(text: str) -> list[tuple[int, str]]:
+    """[(paragraph index, note)] for paragraphs without bimodal burstiness: three sentences in a row of 18-26 words, or four or
+    more sentences with almost no spread. Headings and short paragraphs are skipped. The index counts every paragraph, headings too."""
+    out = []
+    for i, p in enumerate(q for q in re.split(r"\n\s*\n", text) if q.strip()):
+        if p.lstrip().startswith("#"):
+            continue
+        n = [len(s.split()) for s in split_sentences(p)]
+        if len(n) < 3:
+            continue
+        run = next((j for j in range(len(n) - 2) if all(18 <= x <= 26 for x in n[j:j + 3])), None)
+        if run is not None:
+            out.append((i, f"sentences {run + 1}-{run + 3} run {n[run]}, {n[run + 1]}, {n[run + 2]} words"))
+        elif len(n) >= 4 and statistics.pstdev(n) < FLAT_STD:
+            out.append((i, f"sentence lengths {n} barely vary"))
     return out

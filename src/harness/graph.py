@@ -10,12 +10,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from . import config, llm
-from .corpus import retrieve
+from .corpus import lamp_bank, retrieve, skeletons as SK
 from .prompts import sections as P
 from .sources.tools import _FIGURE, CITATION_RULES, facts_for, merge_refs, source_notes_for
 from .sources.verifier import audit_chapter
 from .spend import BudgetExceeded
-from .text import cleanup, numbers
+from .text import cleanup, lamp_rewrite, numbers
 from .text.citations import audit_citations, extract_citations, first_author, match_ref
 from .text.jsonparse import parse_json
 from .text.sentences import split_sentences
@@ -25,9 +25,10 @@ from .validate.overlap import exemplar_ngrams, overlap_report, passage_overlaps
 from .validate.profile import avoid_hits, load_profile, plan_ratios, profile_block, signpost_counts
 from .corpus.profile import _citation_counts
 from .validate.gapfeats import CONNECTIVES, feats, short_sentences
-from .validate.style import feature_stats, score_section, style_target
+from .validate.style import burst_flags, feature_stats, score_section, style_target
 
 POSITIONS = ("open", "mid", "close")
+DRAFT_TEMPERATURE = float(config.get("HARNESS_DRAFT_TEMP", "0.8"))   # drafting and full rewrites; the claim checks stay at 0 (sources/verifier.py)
 N_EXEMPLARS = int(config.get("HARNESS_EXEMPLARS", "3"))   # excerpts per draft call; 4 cost ~3K input tokens x 3 calls. Set 2 or 4 to A/B it.
 # Voice floors as a fraction of the real-thesis mean for the section type (measured in data/style_baseline.json).
 # Below the floor a cheap Haiku patch (first person) or a free paragraph merge (variety) runs; never a Sonnet rewrite.
@@ -66,6 +67,34 @@ SOFT_STYLE = {"citation_per_100", "first_person_per_100", "para_len_cv"}   # fix
 # Measured on saved drafts: AI drafts cite ~1.6x more than real theses, never write in the first person
 # (real: ~0.6 per 100 words), write evenly sized paragraphs and too many very short sentences. Instructions alone
 # only nudge these, but they are free.
+BIMODAL = (
+    "Alternate sharply between dense, multi-clause technical sentences (32\u201348 words) and blunt, declarative empirical or "
+    "methodological statements (5\u201311 words). Never write three consecutive sentences of similar length (18\u201326 words)."
+)
+# What a model does by default and a doctoral writer does not: close every paragraph on a takeaway, resolve every disagreement,
+# never look back or ahead, open on a generic subject. Each is asked for as an exact instruction (see _discourse_extra).
+UNRESOLVED_FRICTION_MOVE = ("set two cited works or observations against each other where they disagree, or leave a gap open, and stop "
+                            "there: no neat synthesis, no sentence that reconciles them")
+ANACHRONY_MOVE = ("point back to an earlier section (by number), a figure or table (by its ID), or defer a boundary condition to a "
+                  "later section, in one plain sentence")
+ANCHOR_RULE = "Put a concrete proper noun (a named author, study, instrument, dataset, place or standard) within its first six words."
+EPILOGUE_RULE = ("End on a specific number, a methodological limitation or a citation detail; no summary, no takeaway, no sentence that "
+                 "says what it all means.")
+EPILOGUE_SHARE, ANCHOR_SHARE = 2 / 3, 0.40
+# Call budgets: one section's words are split unevenly across the three calls, never an equal third each.
+BUDGET_PROFILES = ((0.22, 0.53, 0.25), (0.45, 0.35, 0.20), (0.28, 0.48, 0.24))
+
+
+def call_budgets(seed: str, wt: int) -> dict:
+    """{pos: (words_target, max_tokens)}: 3*wt words split by a section-seeded draw from BUDGET_PROFILES (deterministic)."""
+    ratios = random.Random(seed).choice(BUDGET_PROFILES)
+    out = {}
+    for pos, r in zip(POSITIONS, ratios):
+        w = max(90, round(3 * wt * r))
+        out[pos] = (w, math.ceil(w * 1.6))
+    return out
+
+
 VOICE_RULES = (
     "VOICE RULES (real doctoral prose differs from typical AI prose; follow these):\n"
     "- Write as the researcher who did this work: first person where a human author would (\"I chose\", \"I used\", \"I treat X as\", "
@@ -81,9 +110,7 @@ VOICE_RULES = (
     "clearer, give a plain uncited example from ordinary practice in this field (\"for example, a sensor bolted to a bridge bearing "
     "sees ...\"), never as a finding, a figure or a named study you were not given. Compare sources on what really differs "
     "(design, sample, measure, setting, date). Prefer plain, exact words to impressive ones.\n"
-    "- Rhythm: an average sentence near 29 words, but spread wide: some of 10-15 words beside some of 40-55 (sentence length varies "
-    "more in real theses than in AI drafts), a sentence under eight words about one in twenty, never several long ones in a row. Vary "
-    "paragraph length. Do not use em dashes.\n"
+    "- Bimodal burstiness: " + BIMODAL + " Vary paragraph length. Do not use em dashes.\n"
     "- Open a paragraph with its subject (\"The ...\", \"In ...\") or a case, never with \"What ...\" or a sweeping statement. End it on its "
     "last concrete point, not on a verdict, a one-line restatement or a saying. Do not force every paragraph into the same shape "
     "(claim, citation, limitation, gap); take a position where the evidence supports one and name a limitation only when the "
@@ -135,7 +162,7 @@ _CHAIN = re.compile(r"(?:^|(?<=[.!?] ))[A-Z][\w'\u2019-]+(?: et al\.)?(?: (?:and
 # prompts stay byte-identical for the golden tests. A text that is not found is a no-op.
 _SEEDS = (
     ("- Mix very short sentences (under 8 words) with long analytical ones. Include at least two short sentences per response",
-     "- Let sentence length vary: most sentences run 18-35 words, with an occasional short one where it lands a point"),
+     "- " + BIMODAL),
     ("- Use natural transitions instead: \"What matters here is\u2026\", \"In practice\u2026\", \"The issue becomes more complex when\u2026\", "
      "\"The literature rarely addresses\u2026\", \"That assumption does not hold in\u2026\", \"The problem emerges when\u2026\"",
      "- Use plain transitions (\"For example,\", \"However,\", \"In addition,\", \"As a result,\", \"In contrast,\") or none when the "
@@ -283,6 +310,8 @@ def _tidy(text: str) -> str:
 
 HARD_REASONS = ("cites a work not in REFERENCES", "wording copied from a style exemplar", "generic/stock AI phrase",
                 "copied from a source's abstract")
+FIRST_REASONS = ("cites a work not in REFERENCES", "wording copied from a style exemplar")       # always go first
+RHYTHM_REASONS = ("flat sentence lengths", "no bimodal burstiness", "ends on a summarising verdict")   # then flat paragraphs and takeaway closers
 
 
 def prune_flagged(by_pos: dict, limit: int = 8) -> dict:
@@ -292,7 +321,8 @@ def prune_flagged(by_pos: dict, limit: int = 8) -> dict:
     items = [f for pos in POSITIONS for f in by_pos.get(pos, [])]
     if len(items) <= limit:
         return by_pos
-    key = lambda f: (-sum(any(h in r for h in HARD_REASONS) for r in f["reasons"]), -len(f["reasons"]), -len(f["text"].split()))
+    has = lambda f, names: sum(any(h in r for h in names) for r in f["reasons"])
+    key = lambda f: (-has(f, FIRST_REASONS), -has(f, RHYTHM_REASONS), -has(f, HARD_REASONS), -len(f["reasons"]), -len(f["text"].split()))
     keep = {id(f) for f in sorted(items, key=key)[:limit]}
     return {pos: [f for f in by_pos[pos] if id(f) in keep] for pos in POSITIONS if any(id(f) in keep for f in by_pos.get(pos, []))}
 
@@ -306,6 +336,8 @@ class Deps:
     baseline: dict | None = None                   # style baseline override (tests)
     lookup: Callable | None = None                 # (surname, year, hint) -> real reference | None; None = do not resolve
     profile: dict | None = None                    # mined style profile override; None = data/style_profile.json, {} = none
+    skeletons: list | None = None                  # human discourse skeletons override; None = data/human_skeletons.json, [] = none
+    lamp_examples: list | None = None              # human span examples for the LAMP rewrite; None = data/lamp_span_examples.json
 
 
 class S(TypedDict, total=False):
@@ -319,6 +351,11 @@ class S(TypedDict, total=False):
     profile: dict
     words_target: int
     max_tokens: int
+    budgets: dict             # {pos: (words_target, max_tokens)} per draft call, uneven
+    memory_block: str         # Scholar's cross-chapter memory, ecology and temporal blocks, passed through as written
+    ecology_block: str
+    temporal_block: str
+    section_history: list     # [{opening, closing, paragraphs}] of the chapter's earlier sections, in order
     refs: list                # merged library + ledger sources
     ref_lines: list           # APA strings shown to the model
     added_refs: list          # real works the writer cited from its own knowledge, verified and adopted
@@ -356,7 +393,7 @@ def build_graph(deps: Deps):
         msgs = [HumanMessage(content=prompt)]
         if shared:  # ponytail: one cached system block for the 3 drafts; under ~1K tokens the API just skips caching
             msgs.insert(0, SystemMessage(content=[{"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}}]))
-        return llm.text_of(llm.chat("sonnet", max_tokens=max_tokens, spend=deps.spend).invoke(msgs))
+        return llm.text_of(llm.chat("sonnet", max_tokens=max_tokens, spend=deps.spend, temperature=DRAFT_TEMPERATURE).invoke(msgs))
 
     # ── nodes ───────────────────────────────────────────────────────────────
     def context(state: S):
@@ -371,6 +408,7 @@ def build_graph(deps: Deps):
         refs = merge_refs(state.get("references") or [], state["sources"]) if use_sources else list(state.get("references") or [])
         return {
             "profile": profile, "words_target": wt, "max_tokens": mt, "refs": refs, "ref_lines": _ref_lines(refs),
+            "budgets": call_budgets(f"{state['thesis'].get('title')}|{chapter.get('title')}|{section.get('title')}", wt),
             "notes": "\n\n".join(x for x in (source_notes_for(section, state["sources"], state.get("by_section")) if use_sources else "",
                                              f"{material}\n\n{MATERIAL_RULES}" if material else "") if x),
             "rules": CITATION_RULES if use_sources else "",
@@ -406,6 +444,29 @@ def build_graph(deps: Deps):
     def prof() -> dict | None:
         return deps.profile if deps.profile is not None else load_profile()
 
+    def _at(state: S, which: str) -> S:
+        """The state with this call's own word budget (the three calls are not equal thirds). Idempotent."""
+        if not (state.get("flags") or {}).get("pool", True) or state["profile"]["id"] == "appendix":
+            return state                  # Scholar's own path keeps its single target
+        w, mt = (state.get("budgets") or {}).get(which) or (state["words_target"], state["max_tokens"])
+        return {**state, "words_target": w, "max_tokens": mt}
+
+    def _history_block(state: S) -> str | None:
+        """Where the chapter's earlier sections began and ended, so this one does not repeat their shape."""
+        hist = [h for h in state.get("section_history") or [] if isinstance(h, dict)]
+        if not hist:
+            return None
+        lines = ["EARLIER SECTIONS OF THIS CHAPTER (already written; do not repeat their openings, closings or shape):"]
+        for i, h in enumerate(hist[-6:], 1):
+            lines.append(f'{i}. opened: "{str(h.get("opening") or "")[:160]}" / closed: "{str(h.get("closing") or "")[:160]}" / '
+                         f'{h.get("paragraphs", "?")} paragraphs')
+        last = hist[-1]
+        move = SK.opener_type(str(last.get("opening") or ""))
+        lines.append(f"The section just before this one opened with a sentence of the type {move.replace('_', ' ')} and ran "
+                     f"{last.get('paragraphs', '?')} paragraphs. This section must open with a different kind of sentence and must "
+                     f"not total {last.get('paragraphs', '?')} paragraphs. Refer back to an earlier section instead of restating it.")
+        return "\n".join(lines)
+
     def _shared(state: S) -> str:
         """Blocks identical in all 3 draft calls (style target, voice rules, references, source notes, citation
         rules): sent once as a cached system message so calls 2 and 3 read them at ~10% price. The reference list
@@ -415,7 +476,10 @@ def build_graph(deps: Deps):
         if (state.get("flags") or {}).get("pool", True) and p["id"] != "appendix":
             target = "\n\n".join(x for x in (style_target(p["id"], deps.baseline), profile_block(p["id"], prof(), deps.baseline),
                                               VOICE_RULES) if x)
-        return "\n\n".join(x for x in (target, _ref_block(state), state.get("notes"), state.get("rules")) if x)
+        on = target is not None            # Scholar's own path (pool off, appendix) keeps its prompts exactly
+        carried = [str(state[k])[:6000] for k in ("memory_block", "ecology_block", "temporal_block") if on and state.get(k)]
+        return "\n\n".join(x for x in (target, _ref_block(state), state.get("notes"), state.get("rules"), *carried,
+                                        _history_block(state) if on else None) if x)
 
     def _concrete_rules(state: S, which: str, k: int, rng, moves: list) -> list[str]:
         """Per-paragraph add-ons from the mined profile, so soft targets become exact instructions: which sentence opens
@@ -462,11 +526,47 @@ def build_graph(deps: Deps):
                     extra[i] += ' Cite in parentheses at the end of the sentence, e.g. (Lee, 2015); no "Lee (2015) argues" form in this paragraph.'
         return extra
 
+    def _discourse_extra(state: S, which: str, k: int) -> list[str]:
+        """Per-paragraph add-ons that stop the draft reading like a model: most paragraphs end on a fact and not a takeaway, named
+        things open paragraphs, the middle and the end hold a disagreement left open, and the end looks back or ahead once.
+        Seeded per section, so a rewrite gets the same asks."""
+        rng = random.Random(f"discourse|{state['section'].get('title')}|{which}")
+        extra = [""] * k
+        for i in rng.sample(range(k), min(k, round(EPILOGUE_SHARE * k + 0.5))):         # at least 2 of every 3
+            extra[i] += " " + EPILOGUE_RULE
+        for i in rng.sample(range(k), min(k, math.ceil(ANCHOR_SHARE * k))):
+            extra[i] += " " + ANCHOR_RULE
+        if which in ("mid", "close"):
+            extra[rng.randrange(k)] += " In this paragraph " + UNRESOLVED_FRICTION_MOVE + "."
+        if which == "close":
+            extra[rng.randrange(k)] += " In this paragraph " + ANACHRONY_MOVE + "."
+        return extra
+
+    def _skeleton_specs(state: S, which: str) -> list:
+        """Paragraph specs of the human skeleton assigned to this passage, [] when none fits (then the invented plan runs).
+        Deterministic, so validate() rebuilds the same specs. The seed is per chapter and the section's place picks from it,
+        so the sections of one chapter never share a skeleton."""
+        pool = deps.skeletons if deps.skeletons is not None else SK.load()
+        if not pool:
+            return []
+        state = _at(state, which)
+        t, c, sec = state["thesis"], state["chapter"], state["section"]
+        secs = (c.get("toc_sections") or {}).get("sections") or [] if isinstance(c.get("toc_sections"), dict) else []
+        idx = next((i for i, x in enumerate(secs) if x.get("number") == sec.get("number")), 0)
+        sk = SK.pick(pool, state["profile"]["id"], which, state["words_target"], f"{t.get('title')}|{c.get('title')}|{which}", idx)
+        return SK.scale(sk, state["words_target"]) if sk else []
+
     def _para_plan(state: S, which: str) -> str:
         """Paragraph lengths for this passage, drawn from a spread-out set so the draft is not evenly sized
         (real theses: paragraph-length variation ~0.7, drafts ~0.4). Seeded, so a rewrite gets the same plan."""
         if not (state.get("flags") or {}).get("pool", True) or state["profile"]["id"] == "appendix":
             return ""
+        state = _at(state, which)
+        specs = _skeleton_specs(state, which)
+        if specs:
+            more = _discourse_extra(state, which, len(specs))
+            asks = [f"{i}.{x}" for i, x in enumerate(more, 1) if x]
+            return SK.blueprint(specs) + ("\n\nDISCOURSE MOVES (by paragraph number above):\n" + "\n".join(asks) if asks else "")
         k = max(2, min(6, round(state["words_target"] / 140)))
         rng = random.Random(f"{state['section'].get('title')}|{which}")
         real = plan_ratios(state["profile"]["id"], prof())    # measured: paragraph length relative to the mean, real theses
@@ -475,12 +575,14 @@ def build_graph(deps: Deps):
         sizes = [int(max(30, round(state["words_target"] * m / total, -1))) for m in mult]
         moves = rng.sample(PARAGRAPH_MOVES, k)       # a different move per paragraph: no fixed claim-citation-gap template
         extra = _concrete_rules(state, which, k, rng, moves)
+        extra = [a + b for a, b in zip(extra, _discourse_extra(state, which, k))]
         lines = [f"{i}. about {n} words: {m}{extra[i - 1]}" for i, (n, m) in enumerate(zip(sizes, moves), 1)]
         return ("\n\nPARAGRAPH PLAN for this passage (in order; the heading line is not counted). Follow the lengths so "
                 "paragraphs differ clearly, and make each move from what the sources actually say, without turning it "
                 "into a template. Use a number only where a line below or the source notes give one:\n" + "\n".join(lines))
 
     def _prompt(state: S, which: str, chunks: dict, feedback: str | None = None) -> str:
+        state = _at(state, which)
         harness_on = (state.get("flags") or {}).get("pool", True) and state["profile"]["id"] != "appendix"
         text = _build(state, which, chunks, feedback, harness_on)
         return _plain(text) if harness_on else text
@@ -512,7 +614,7 @@ def build_graph(deps: Deps):
     def _draft(which: str):
         def node(state: S):
             chunks = dict(state.get("chunks", {}))
-            chunks[which] = gen(_prompt(state, which, chunks) + _para_plan(state, which), state["max_tokens"], _shared(state))
+            chunks[which] = gen(_prompt(state, which, chunks) + _para_plan(state, which), _at(state, which)["max_tokens"], _shared(state))
             return {"chunks": chunks}
         return node
 
@@ -756,14 +858,26 @@ def build_graph(deps: Deps):
         avoid = sum(1 for para in re.split(r"\n\s*\n", text) if len(avoid_hits(para, prof())) >= 2) if pool_on else 0
         signposts, narrative = _style_targets(chunks, text) if pool_on else ([], [])
         plain = _plain_targets(chunks, text, ptype) if pool_on else {}
+        skel, skel_rep = [], {}
+        if pool_on:
+            for pos in POSITIONS:
+                specs = _skeleton_specs(state, pos)
+                if specs:
+                    a = SK.adherence(chunks[pos], specs)
+                    skel_rep[pos] = a["paragraphs"]
+                    skel += [(pos, i, f"std {std}, plan {cad}") for i, std, cad in a["flat"]]
+        burst = []
+        if pool_on:
+            flat_at = {(a, b) for a, b, _ in skel}
+            burst = [(pos, i, note) for pos in POSITIONS for i, note in burst_flags(chunks[pos]) if (pos, i) not in flat_at]
         problems = {"voice": voice, "cites": cites, "chains": chains, "avoid": avoid, "signposts": signposts,
                     "narrative": narrative, "plain": plain, "unmatched": unmatched, "overlap": ov if ov["flagged"] else None,
                     "style": style if style.get("available") and not style.get("passed") else None,
                     "formulaic": stiff if stiff >= 2 else 0,   # one stock phrase is normal prose; a pattern is not
                     "citedpara": cited_p, "copied": pasted, "repeat": rep.get("repeat", []), "stance": rep.get("stance", []),
                     "closer": rep.get("closer", []), "whatopen": rep.get("whatopen", []),
-                    "numbers": figs, "examples": exs}
-        reports = {"style": {k: v for k, v in style.items() if k != "features"}, "overlap": ov,
+                    "numbers": figs, "examples": exs, "skeleton": skel, "burst": burst}
+        reports = {"style": {k: v for k, v in style.items() if k != "features"}, "overlap": ov, "skeleton": skel_rep,
                    "citations": {"unmatched": unmatched}}
         grown = {"refs": refs, "ref_lines": state["ref_lines"] + [r["apa"] for r in added],
                  "added_refs": state.get("added_refs", []) + added} if added else {}
@@ -779,7 +893,7 @@ def build_graph(deps: Deps):
         bad = bool(p["unmatched"] or p["overlap"] or p["style"] or p.get("formulaic") or p.get("voice") or p.get("cites") or p.get("chains") or p.get("avoid")
                    or p.get("signposts") or p.get("narrative") or any((p.get("plain") or {}).values())
                    or p.get("citedpara") or p.get("copied") or p.get("repeat") or p.get("stance") or p.get("closer") or p.get("whatopen")
-                   or p.get("numbers") or p.get("examples"))
+                   or p.get("numbers") or p.get("examples") or p.get("skeleton") or p.get("burst"))
         return "revise" if bad and flags.get("revise", True) and state["revisions"] == 0 else "verify"
 
     def _worst(state: S) -> str:
@@ -844,6 +958,11 @@ def build_graph(deps: Deps):
                 if (pos, i) in set(state["problems"].get("examples") or []):
                     reasons.append('has no example: add one or two sentences with a plain example from ordinary practice, introduced with '
                                    '"for example" or "such as", uncited; no named study and no figure you were not given')
+                if (pos, i) in at("skeleton"):
+                    reasons.append(f'has flat sentence lengths ({at("skeleton")[(pos, i)]}): rewrite so the sentences follow the planned '
+                                   "cadence, a blunt short sentence next to a long clause; keep every fact, number and citation")
+                if (pos, i) in at("burst"):
+                    reasons.append(f'has no bimodal burstiness ({at("burst")[(pos, i)]}): ' + BIMODAL + " Keep every fact, number and citation")
                 pl = state["problems"].get("plain") or {}
                 if (pos, i) in set(pl.get("that") or []):
                     reasons.append('uses "that" ' + str(len(re.findall(r"\bthat\b", para, re.I))) + ' times: drop "that" wherever the '
@@ -951,7 +1070,7 @@ def build_graph(deps: Deps):
         # later passages continue from earlier ones, so a rewrite carries forward
         for pos in POSITIONS[POSITIONS.index(worst):]:
             chunks[pos] = gen(_prompt(state, pos, chunks, feedback if pos == worst else None) + _para_plan(state, pos),
-                              state["max_tokens"], _shared(state))
+                              _at(state, pos)["max_tokens"], _shared(state))
         return {"chunks": chunks, "revisions": 1}
 
     def _locate(chunks: dict, sentence: str):
@@ -978,6 +1097,8 @@ def build_graph(deps: Deps):
                 dropped += 1
         return chunks, dropped
 
+    patched_sentences: list[str] = []      # sentences _fix_unsupported wrote (Haiku, temperature 0): the LAMP pass always edits these
+
     def _fix_unsupported(state: S, checks: list[dict], verdicts: tuple = ("UNSUPPORTED",)) -> tuple[dict, int]:
         """One cheap call rewrites each sentence the checker marked UNSUPPORTED (or PARTIAL, when asked) so it stays
         within its source's abstract. A sentence that can't be found in the chunks is left alone."""
@@ -1001,6 +1122,7 @@ def build_graph(deps: Deps):
             if loc:
                 pos, a, b = loc
                 chunks[pos] = chunks[pos][:a] + new.strip() + chunks[pos][b:]
+                patched_sentences.append(new.strip())
                 fixed += 1
         return chunks, fixed
 
@@ -1039,6 +1161,7 @@ def build_graph(deps: Deps):
             claims = {**claims, "error": str(e)}
         if fixed:
             claims["fixed_unsupported"] = fixed
+            claims["patched_sentences"] = list(patched_sentences)
         if dropped:
             claims["dropped_unsupported"] = dropped
         out = {"chunks": chunks} if (fixed or dropped) else {}
@@ -1089,6 +1212,28 @@ def _new_refs(text: str, library: list, found: list) -> list[dict]:
     return out
 
 
+def _lamp_tail(chunks: dict, state: dict, deps: Deps) -> tuple[dict, dict]:
+    """LAMP span rewrite of what the detector flags (flat paragraphs, closers, claim-fixer sentences), one Sonnet call. The edits are
+    applied to the chunks they came from. Any failure keeps the text as it was."""
+    if config.get("HARNESS_LAMP", "on").lower() == "off" or not (state.get("flags") or {}).get("lamp", True):
+        return chunks, {"skipped": "off"}
+    examples = deps.lamp_examples if deps.lamp_examples is not None else lamp_bank.load()
+    patched = (state.get("reports", {}).get("claims") or {}).get("patched_sentences") or []
+    try:
+        _, rep = lamp_rewrite.lamp_rewrite_section(_glue(chunks), state["profile"]["id"], examples, deps.spend, patched)
+    except Exception as e:  # noqa: BLE001 - an optional polish never costs the section
+        return chunks, {"error": f"{type(e).__name__}: {e}"[:200]}
+    out, lost = dict(chunks), 0
+    for old, new in rep.pop("edits", []):
+        pos = next((p for p in POSITIONS if old in out[p]), None)
+        if pos is None:
+            lost += 1                                   # the span straddled a chunk seam
+            continue
+        out[pos] = out[pos].replace(old, new, 1)
+    rep["applied"] -= lost
+    return out, rep
+
+
 def write_section(request: dict, deps: Deps) -> dict:
     """request: {thesis, chapter, section, references, ledger:{sources,by_section}, flags, n_sections?}.
     -> {text, reports, revisions}"""
@@ -1098,11 +1243,14 @@ def write_section(request: dict, deps: Deps) -> dict:
         "references": request.get("references") or [], "sources": ledger.get("sources") or [],
         "by_section": ledger.get("by_section") or {}, "flags": request.get("flags") or {},
         "n_sections": request.get("n_sections"),
+        **{k: request[k] for k in ("memory_block", "ecology_block", "temporal_block") if isinstance(request.get(k), str)},
+        "section_history": [h for h in request.get("section_history") or [] if isinstance(h, dict)][-12:],
         "author_material": request["author_material"] if isinstance(request.get("author_material"), str) else "",
     }, config={"recursion_limit": 40})
     c = state["chunks"]
     text = c["open"] + c["mid"] + c["close"]
     if (request.get("flags") or {}).get("pool", True) and state["profile"]["id"] != "appendix":
+        c, state["reports"]["lamp"] = _lamp_tail(c, state, deps)    # after the claim check, before the free rewrites
         c = cleanup.heal(c)                       # the claim fix can leave a seam or a restated sentence too
         c, _ = cleanup.drop_repeats(c, [r["abstract"] for r in state.get("refs", []) if isinstance(r, dict) and r.get("abstract")])
         c, _ = cleanup.polish(c, _that_limit(state["profile"]["id"], deps.profile if deps.profile is not None else load_profile()))

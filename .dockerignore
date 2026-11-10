@@ -5,6 +5,8 @@ data/*
 !data/style_baseline.json
 !data/style_profile.json
 !data/fields.selected.json
+!data/human_skeletons.json
+!data/lamp_span_examples.json
 eval
 build
 tests

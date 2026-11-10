@@ -12,7 +12,8 @@ _END = '.!?)"”’'
 _GLUE = re.compile(r"(?<=[a-z][.!?])(?=[A-Z][a-z])")                 # "remains.The" -> "remains. The"
 STANCE = re.compile(r"\b(?:I (?:argue|contend|would argue|maintain|take the view)|this study takes the position)\b", re.I)
 CLOSER = re.compile(r"^(?:What (?:the|these|this) \w+(?: \w+){0,3} (?:show|suggest|mean|share)|The (?:answer|upshot)\b|Taken together\b|"
-                    r"This (?:means|suggests|matters)\b|In (?:short|sum)\b|Overall\b|Ultimately\b|The (?:implication|lesson|takeaway)\b)", re.I)
+                    r"This (?:means|suggests|matters|indicates that)\b|In (?:short|sum)\b|Overall\b|Ultimately\b|The (?:implication|lesson|takeaway)\b|"
+                    r"These findings collectively\b|Such dynamics\b)", re.I)
 REPORT = re.compile(r"^[A-Z][\w'’-]+(?: et al\.)?(?: (?:and|&) [A-Z][\w'’-]+)? \((?:19|20)\d\d[a-z]?\) "
                     r"(?:trace|note|offer|reinforce|situate|frame|argue|show|suggest|highlight|emphasi[sz]e|review|examine|explore|report|describe)s?\b")
 # a figure is a number that is not a year and not inside a word ("94%", "12 mm", "120 samples"; not "2019", not "ADXL355")

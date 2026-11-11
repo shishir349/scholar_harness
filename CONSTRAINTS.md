@@ -12,7 +12,7 @@ Body sections = `introduction`, `literature_review`, `methodology`, `findings`, 
 |---|------|-------|
 | 1 | **Zero micro-paragraphs** | 0 paragraphs with fewer than 3 sentences or fewer than 70 words |
 | 2 | **Intra-paragraph cadence** | every paragraph of 3+ sentences: sentence-length std >= 6.8 words, longest sentence <= 42 words, at least one sentence of <= 11 words inside it (never a 1-2 sentence paragraph of its own) |
-| 3 | **Narrative citation ceiling** | <= 2 "Author (Year) verb ..." sentences per call (open / mid / close), <= 5 per section; >= 70% of citations parenthetical, concept-first `(Author, Year; Author, Year)` |
+| 3 | **Narrative citation ceiling** | <= 2 "Author (Year) verb ..." sentences per call (open / mid / close), <= 4 per section; >= 70% of citations parenthetical, concept-first `(Author, Year; Author, Year)` |
 | 4 | **Zero cross-chunk duplicate claims** | content-word Jaccard < 0.35 between any two sentences of the assembled section; no `(Author, Year)` summarised in a narrative sentence twice |
 | 5 | **Golden tests untouched** | `src/harness/prompts/sections.py` and `tests/golden/cases.json` are byte-identical to `HEAD` |
 

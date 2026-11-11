@@ -30,11 +30,11 @@ def narrative(who, year, tag, verb="found"):
 # ── gates as numbers ───────────────────────────────────────────────────────────────────────────────────────────────
 def test_the_gate_numbers_are_the_ones_in_constraints_md():
     assert (L.MIN_SENTS, L.MIN_WORDS, L.STD_MIN, L.MAX_SENT, L.SHORT_MAX) == (3, 70, 6.8, 42, 11)
-    assert (L.NARR_CALL, L.NARR_SECTION, L.PAREN_SHARE, L.DUP_JACCARD) == (2, 5, 0.70, 0.35)
-    assert (V.FLAT_STD, V.MAX_SENT_WORDS, V.SHORT_SENT_WORDS, D.FLAT_STD, D.NARRATIVE_CAP) == (6.8, 42, 11, 6.8, 5)
-    assert (G.MAX_NARRATIVE_PASSAGE, G.MAX_NARRATIVE_SECTION, C.MIN_SENTS, C.MIN_WORDS, LR.MAX_SPANS) == (2, 5, 3, 70, 14)
+    assert (L.NARR_CALL, L.NARR_SECTION, L.PAREN_SHARE, L.DUP_JACCARD) == (2, 4, 0.70, 0.35)
+    assert (V.FLAT_STD, V.MAX_SENT_WORDS, V.SHORT_SENT_WORDS, D.FLAT_STD, D.NARRATIVE_CAP) == (6.8, 42, 11, 6.8, 4)
+    assert (G.MAX_NARRATIVE_PASSAGE, G.MAX_NARRATIVE_SECTION, C.MIN_SENTS, C.MIN_WORDS, LR.MAX_SPANS) == (2, 4, 3, 70, 14)
     text = open(ROOT / "CONSTRAINTS.md", encoding="utf-8").read()
-    for token in ("70 words", "6.8", "42 words", "11 words", "<= 2", "<= 5", "70%", "0.35"):
+    for token in ("70 words", "6.8", "42 words", "11 words", "<= 2", "<= 4", "70%", "0.35"):
         assert token in text, token
 
 

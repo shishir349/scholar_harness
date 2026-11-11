@@ -102,33 +102,52 @@ def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: 
 merge_short = merge_short_paragraphs
 
 
-_SPLIT_AT = re.compile(r"(?:; |, (?:and|but|yet|so|while|whereas) )")
 _FINITE = re.compile(r"\b(?:is|are|was|were|be|been|has|have|had|do|does|did|can|could|may|might|will|would|must|should|means|requires?|"
                      r"depends?|remains?|reflects?|makes?|allows?|produces?|shows?|holds?|creates?|carries|rests?|sits?|needs?)\b", re.I)
+_WHICH_VERB = (r"(?:means|suggests|implies|shows|indicates|reflects|makes|leaves|explains|raises|creates|limits|allows|produces|requires|signals|"
+               r"reveals|remains|is|was|has|carries|holds|reduces|increases|undermines|complicates|prevents|permits|reinforces|confirms|points|rests|depends)")
+_MAIN_VERB = re.compile(r", (?:is|are|was|were|has|have|had|can|may|could|would|will|must|remains?) ")
+# (marker, prefix of the new sentence, min words before, min words after, tail needs a finite verb, extra check on (head, tail))
+_CUTS = (
+    (re.compile(r"; "), lambda m: "", 9, 9, True, None),
+    (re.compile(r"(?<=\w): (?=[A-Za-z])"), lambda m: "", 9, 8, True, None),
+    (re.compile(r", (?:and|but|yet|so) "), lambda m: "", 9, 9, True, None),
+    (re.compile(r", while "), lambda m: "", 9, 9, True, None),
+    (re.compile(r", (?:even )?though "), lambda m: "", 9, 9, True, None),
+    (re.compile(r", whereas "), lambda m: "In contrast, ", 9, 9, True, None),
+    (re.compile(r", where "), lambda m: "There, ", 9, 10, True, None),
+    (re.compile(rf", which (?={_WHICH_VERB}\b)"), lambda m: "This ", 22, 10, False, None),
+    (re.compile(r", (partly |largely |mainly |chiefly )?because "), lambda m: f"This is {m.group(1) or ''}because ", 9, 9, False, None),
+    (re.compile(r", (?:a|an) ((?:[a-z][a-z-]+ ){0,3}[a-z][a-z-]+) (?:that|which) (?=[a-z]+s\b)"), lambda m: f"This {m.group(1)} ", 9, 9, False,
+     lambda head, tail: not _MAIN_VERB.search(tail)),                               # ", a design choice that allows X": not an appositive the main clause resumes after
+    (re.compile(r"(?<=\)), who "), lambda m: "They ", 9, 9, False, lambda head, tail: bool(re.search(r"\((?:19|20)\d\d[a-z]?\)$", head))),
+)
 
 
 def _split_sentence(s: str, limit: int) -> str:
-    """One sentence over `limit` words cut at the clause boundary nearest its middle: '; ' or ', and/but/yet/so/while/whereas '
-    outside any bracket, both halves at least 9 words, the second with a finite verb (so a list's last item is never cut off).
-    The conjunction is dropped. Returns the sentence unchanged when no such boundary exists."""
+    """One sentence over `limit` words cut at the clause boundary nearest its middle, outside any bracket, both halves long enough:
+    '; ', ': ', ', and/but/yet/so ', ', while/though ' (the conjunction is dropped), ', whereas ' (-> 'In contrast, '), ', where ' (-> 'There, '),
+    ', which means ...' late in the sentence (-> 'This means ...'), ', because ' (-> 'This is because'), ', a design choice that allows ...'
+    (-> 'This design choice allows ...') and a citation followed by ', who ' (-> 'They'). Only connectives change: every citation, number and
+    quote is untouched. Returns the sentence unchanged when no such boundary exists."""
     if len(s.split()) <= limit:
         return s
-    depth, cuts = 0, []
-    for m in re.finditer(r"[()]|; |, (?:and|but|yet|so|while|whereas) ", s):
-        if m.group(0) == "(":
-            depth += 1
-        elif m.group(0) == ")":
-            depth = max(0, depth - 1)
-        elif depth == 0:
+    cuts = []
+    for rx, prefix, min_head, min_tail, need_verb, check in _CUTS:
+        for m in rx.finditer(s):
             head, tail = s[:m.start()], s[m.end():]
-            if len(head.split()) >= 9 and len(tail.split()) >= 9 and _FINITE.search(tail) and head.count("(") == head.count(")"):
-                cuts.append((abs(len(head.split()) - len(tail.split())), m, head, tail))
+            if len(head.split()) < min_head or len(tail.split()) < min_tail or head.count("(") != head.count(")"):
+                continue
+            if need_verb and not _FINITE.search(tail):
+                continue
+            if check and not check(head, tail):
+                continue
+            cuts.append((abs(len(head.split()) - len(tail.split())), m.start(), head, prefix(m), tail))
     if not cuts:
         return s
-    _, m, head, tail = min(cuts, key=lambda c: c[0])
-    conj = m.group(0).strip(" ,;")
-    tail = tail[:1].upper() + tail[1:] if conj in ("and", "but", "yet", "so", "") else tail[:1].upper() + tail[1:]
-    return _split_sentence(head.rstrip(" ,;") + ". ", limit).rstrip() + " " + _split_sentence(tail, limit)
+    _, _, head, pre, tail = min(cuts, key=lambda c: c[:2])
+    tail = pre + tail if pre else tail[:1].upper() + tail[1:]
+    return _split_sentence(head.rstrip(" ,;:") + ". ", limit).rstrip() + " " + _split_sentence(tail, limit)
 
 
 def split_long(chunks: dict, limit: int = 42) -> dict:
@@ -493,7 +512,9 @@ _NM = r"[A-Z][\w'\u2019-]+"
 _AUTH = rf"({_NM}(?: et al\.)?(?:(?:, {_NM})*,? (?:and|&) {_NM})?)"          # Smith | Smith and Lee | Smith, Lee, and Wu | Smith et al.
 _YEAR = r"\(((?:19|20)\d\d[a-z]?)\)"
 _SAY = (r"(?:argued|noted|found|showed|demonstrated|observed|reported|suggested|claimed|emphasi[sz]ed|pointed out|established|concluded|"
-        r"described|identified|proposed|stated|maintained|contended|highlighted|reveal(?:ed)?|indicated|asserted|explained|stressed|acknowledged)")
+        r"described|identified|proposed|stated|maintained|contended|highlighted|reveal(?:ed)?|indicated|asserted|explained|stressed|acknowledged|"
+        r"argues|notes|finds|shows|demonstrates|observes|reports|suggests|claims|emphasi[sz]es|concludes|identifies|proposes|states|maintains|"
+        r"contends|highlights|reveals|indicates|asserts|explains|stresses|acknowledges)")
 _SAY_BARE = r"(?:argued|noted|found|showed|observed|suggested|concluded|reported|claimed|stated|indicated|demonstrated)"   # may omit "that" before a clause
 _DET = r"(?:the|a|an|this|these|those|there|it|its|their|such|most|many|both|no|all|some|each|any)"
 _STUDY = (r"(?:conducted|undertook|carried out|performed|completed|examined|surveyed|reviewed|analy[sz]ed|studied|investigated|interviewed|measured|"
@@ -503,11 +524,16 @@ _END = r"([.!?])$"
 _NARR_OPEN = re.compile(rf"^{_AUTH} {_YEAR} {_ALSO}{_SAY} that (.+?){_END}")                                       # A: Smith (2010) found that X.
 _NARR_BARE = re.compile(rf"^{_AUTH} {_YEAR} {_ALSO}{_SAY_BARE} ((?:{_DET}) .+?){_END}")       # A2: Smith (2010) noted the field had X.
 _NARR_STUDY = re.compile(rf"^{_AUTH} {_YEAR} ({_STUDY}) (.+?) and {_ALSO}{_SAY} (?:that |(?={_DET} ))(.+?){_END}")   # C: Smith (2010) surveyed 235 firms and found that X.
-_NARR_AS = re.compile(rf"^{_AUTH} {_YEAR} (described|defined|characteri[sz]ed|conceptuali[sz]ed|framed|viewed|conceived|portrayed|depicted|treated) "
+_PARTICIPLE = {"describe": "described", "describes": "described", "define": "defined", "defines": "defined", "characterise": "characterised",
+               "characterises": "characterised", "characterize": "characterized", "characterizes": "characterized",
+               "conceptualise": "conceptualised", "conceptualises": "conceptualised", "conceptualize": "conceptualized",
+               "conceptualizes": "conceptualized", "frame": "framed", "frames": "framed", "view": "viewed", "views": "viewed",
+               "conceive": "conceived", "conceives": "conceived", "portray": "portrayed", "portrays": "portrayed", "depict": "depicted",
+               "depicts": "depicted", "treat": "treated", "treats": "treated"}      # present tense -> "is/are <participle>"
+_NARR_AS = re.compile(rf"^{_AUTH} {_YEAR} (described|defined|characteri[sz]ed|conceptuali[sz]ed|framed|viewed|conceived|portrayed|depicted|treated|identified|"
+                      r"recogni[sz]ed|regarded|labelled|labeled|classified|interpreted|"
+                      r"describes?|defines?|characteri[sz]es?|conceptuali[sz]es?|frames?|views?|conceives?|portrays?|depicts?|treats?) "
                       rf"(.{{2,60}}?) as (.+?){_END}")                                                              # D: Smith (2010) described X as Y.
-_PAST = (r"(?:\w+ed|found|drew|showed|took|saw|built|held|made|gave|ran|wrote|grew|led|began|set|put|laid|sought|"
-         r"distinguished|pointed|stressed|argued|noted|identified)")
-_NARR_LEAD = re.compile(rf"^{_AUTH} {_YEAR} ({_ALSO}{_PAST} .+)$")                                                  # E: Smith (2010) pushed the field by X.
 _NARR_BY = re.compile(rf"\b(?:by|from) {_AUTH} {_YEAR}(?!,? (?:who|which|whose|whom)\b)")                          # H: ... noted by Smith (2010), applies
 _NARR_MID = re.compile(rf", as {_AUTH} {_YEAR} {_SAY},")                                                            # B: ..., as Smith (2010) argued, ...
 _PAREN_ITEM = re.compile(r"[A-Z][\w'\u2019-]+(?: et al\.?| (?:&|and) [A-Z][\w'\u2019-]+)?,\s*(?:19|20)\d\d[a-z]?")
@@ -526,11 +552,11 @@ def _cap(x: str) -> str:
     return f"{x[:1].upper()}{x[1:]}"
 
 
-def _restate(x: str, lead: str = ""):
+def _restate(x: str):
     """'Smith (2010) found that X.' -> 'X (Smith, 2010).'  Also: noted/found + clause without "that"; 'surveyed N firms and found that X'
     (the study description moves into the parenthesis when it holds a number, else it is dropped); 'described X as Y' (-> 'X was described as Y');
-    a mid-sentence ', as Smith (2010) argued,' or 'noted by Smith (2010)'; with `lead`, last resort: 'Smith (2010) pushed X.' ->
-    'A study (Smith, 2010) pushed X.'. None when the sentence is none of these (the validator still reports it).
+    a mid-sentence ', as Smith (2010) argued,' or 'noted by Smith (2010)'. Present tense works too. None when the sentence is none of
+    these: it stays for LAMP (narrative_surplus) and the validator keeps reporting it; there is no "A study (Smith, 2010) verbed" fallback.
     Every citation, number and name survives: protect.compare stays clean."""
     x = x.strip()
     if _narr(x) != 1:
@@ -554,15 +580,13 @@ def _restate(x: str, lead: str = ""):
     m = _NARR_AS.match(x)
     if m:
         obj = m.group(4)
-        verb = {"conceptualised": "conceptualised", "conceptualized": "conceptualized"}.get(m.group(3), m.group(3))
-        be = "were" if re.search(r"[a-z]s$", obj) and not re.search(r"(?:ss|us|is)$", obj) else "was"
+        verb = _PARTICIPLE.get(m.group(3), m.group(3))
+        plural = bool(re.search(r"[a-z]s$", obj) and not re.search(r"(?:ss|us|is)$", obj))
+        be = ("are" if plural else "is") if m.group(3) in _PARTICIPLE else ("were" if plural else "was")
         return f"{_cap(obj)} {be} {verb} as {m.group(5)} ({_tag(m.group(1), m.group(2))}){m.group(6)}"
     m = _NARR_BY.search(x)
     if m and m.start() > 0:
         return x[:m.start()].rstrip() + f" ({_tag(m.group(1), m.group(2))})" + x[m.end():]
-    m = _NARR_LEAD.match(x)
-    if m and lead:
-        return f"{lead} ({_tag(m.group(1), m.group(2))}) {m.group(3)}"
     return None
 
 
@@ -576,34 +600,31 @@ def limit_narrative(chunks: dict, per_call: int = limits.NARR_CALL, per_section:
     doc = {pos: [x[0] for x in ps] for pos, ps in doc.items()}
     where = [(pos, i, j) for pos in POSITIONS for i, sents in enumerate(doc[pos]) for j, x in enumerate(sents) if _narr(x)]
 
-    def flip(k, last_resort=False):
+    def flip(k):
         pos, i, j = k
-        x = doc[pos][i][j]
-        new = _restate(x) or (_restate(x, "A study") if last_resort else None)
+        new = _restate(doc[pos][i][j])
         if new:
             doc[pos][i][j] = new
         return bool(new)
 
     def over(ks, limit):                                            # flip from the end, skipping what cannot be restated, until within `limit`
-        for last_resort in (False, True):                           # the plain patterns first; "A study (Smith, 2010) verbed" only if still over
-            left = [k for k in ks if _narr(doc[k[0]][k[1]][k[2]])]
-            for k in reversed(left):
-                if len(left) <= limit:
-                    return
-                if flip(k, last_resort):
-                    left.remove(k)
+        left = [k for k in ks if _narr(doc[k[0]][k[1]][k[2]])]
+        for k in reversed(left):
+            if len(left) <= limit:
+                return
+            if flip(k):
+                left.remove(k)
 
     for pos in POSITIONS:                                           # 1. per passage
         over([w for w in where if w[0] == pos], per_call)
     over(where, per_section)                                        # 2. per section
     left = [w for w in where if _narr(doc[w[0]][w[1]][w[2]])]
     paren = sum(len(_PAREN_ITEM.findall(g)) for pos in POSITIONS for sents in doc[pos] for x in sents for g in _PAREN_GROUP.findall(x))
-    for last_resort in (False, True):                               # 3. parenthetical share
-        for k in reversed(list(left)):
-            if paren / max(1, paren + len(left)) >= paren_share:
-                break
-            if flip(k, last_resort):
-                paren, left = paren + 1, [w for w in left if w != k]
+    for k in reversed(list(left)):                                  # 3. parenthetical share
+        if paren / max(1, paren + len(left)) >= paren_share:
+            break
+        if flip(k):
+            paren, left = paren + 1, [w for w in left if w != k]
     out = dict(chunks)
     for pos in POSITIONS:
         ps = paras(chunks[pos])

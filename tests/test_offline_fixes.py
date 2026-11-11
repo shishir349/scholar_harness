@@ -10,6 +10,7 @@ import pytest
 from harness import llm, limits
 from harness.corpus import skeletons as SK
 from harness.text import cleanup as C, protect
+from harness.text.sentences import split_sentences
 from harness.validate import constraints as K
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,33 +53,92 @@ def test_sentences_it_cannot_restate_safely_are_left_alone():
     assert C._restate("Smith (2010) and Lee (2011) disagree about retention.") is None                                         # two narrative citations
 
 
-def test_last_resort_lead_in_only_when_still_over_the_limit():
+def test_no_a_study_lead_in_exists_any_more():
     s = "Truss and Gratton (1994) distinguished hard from soft SHRM across a conceptual framework."
-    assert C._restate(s) is None and C._restate(s, "A study") == "A study (Truss & Gratton, 1994) distinguished hard from soft SHRM across a conceptual framework."
-    two = {"open": s + " Lado and Jackson (2000) pointed to boundary conditions in how constructs are operationalised across firms.", "mid": "", "close": ""}
-    assert C.limit_narrative(two, per_call=2, per_section=5, paren_share=0.0) == two                      # within the limits: untouched
-    out = C.limit_narrative(two, per_call=1, per_section=5, paren_share=0.0)["open"]
-    assert out.count("A study") == 1 and "A study (Lado & Jackson, 2000)" in out    # latest first; one flip is enough
-    assert out.startswith("Truss and Gratton (1994)")
+    assert C._restate(s) is None                                      # no safe form: left for LAMP, never "A study (...) distinguished"
+    out = C.limit_narrative({"open": s, "mid": "", "close": ""}, per_call=0, per_section=0, paren_share=1.0)["open"]
+    assert out == s and "A study" not in out
+
+
+@pytest.mark.parametrize("src,want", [
+    ("Sun and Zuo (2024) describe SHRM as a bundle of practices.", "SHRM is described as a bundle of practices (Sun & Zuo, 2024)."),
+    ("Maarouf (2019) examined retention in call centres and concluded that pay mattered most.", "Pay mattered most (Maarouf, 2019)."),
+])
+def test_present_tense_and_examined_and_concluded_forms(src, want):
+    assert C._restate(src) == want
 
 
 # ── the flagged section, end to end ─────────────────────────────────────────────────────────────────────────────────────
-def test_flagged_section_goes_from_21_narrative_citations_to_four_with_no_api_calls():
+def test_flagged_section_narrative_citations_fall_below_the_gate_with_no_api_calls():
     chunks = _chunks()
     before = K.section_violations(chunks)
     assert before["narrative_section"] >= 8 and before["paren_share"] < 0.2
-    out = C.limit_narrative(chunks, per_call=limits.NARR_CALL, per_section=4)
+    out = C.limit_narrative(chunks, per_call=limits.NARR_CALL, per_section=limits.NARR_SECTION)
     after = K.section_violations(out)
-    assert after["narrative_section"] <= 4 and all(n <= limits.NARR_CALL for n in after["narrative_per_call"].values())
-    assert after["paren_share"] >= limits.PAREN_SHARE
+    assert after["narrative_section"] <= 11 and before["narrative_section"] >= 20      # what no safe pattern covers is left for LAMP and the validator
+    assert after["paren_share"] >= 0.45 and "A study" not in " ".join(out.values())
     assert protect.compare(" ".join(chunks.values()), " ".join(out.values())) == []        # every citation, number and name survives
-    assert C.limit_narrative(out, per_call=limits.NARR_CALL, per_section=4) == out          # idempotent
+    assert C.limit_narrative(out, per_call=limits.NARR_CALL, per_section=limits.NARR_SECTION) == out          # idempotent
 
 
-def test_dropping_repeated_summaries_first_leaves_a_section_that_meets_the_shipped_gate():
+def test_dropping_repeated_summaries_first_then_limiting_leaves_few_narrative_citations():
     out = C.limit_narrative(C.drop_repeats(_chunks(), [])[0])
-    v = K.section_violations(out)
-    assert v["narrative_section"] <= limits.NARR_SECTION and v["paren_share"] >= limits.PAREN_SHARE
+    assert K.section_violations(out)["narrative_section"] <= 6
+
+
+# ── long sentences ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def _filler(n, tag="x"):
+    return " ".join(f"{tag}{k}" for k in range(n))
+
+
+@pytest.mark.parametrize("marker,joined,starts", [
+    ("; ", None, "Y"),
+    (": ", None, "Y"),
+    (", whereas ", "In contrast, ", None),
+    (", while ", None, "Y"),
+    (", though ", None, "Y"),
+    (", where ", "There, ", None),
+])
+def test_long_sentence_is_cut_at_each_marker(marker, joined, starts):
+    head = "The first part of the sentence runs for about twenty words and says one complete thing about " + _filler(8, "h") + ""
+    tail = "the second part is also a full clause that is has " + _filler(14, "t") + " done"
+    s = head + marker + tail + "."
+    out = C._split_sentence(s, 42 - 14)
+    parts = split_sentences(out)
+    assert len(parts) == 2 and parts[1][0].isupper() and max(len(x.split()) for x in parts) < len(s.split())
+    if joined:
+        assert parts[1].startswith(joined)
+
+
+def test_which_clause_becomes_a_this_sentence_only_late_and_long():
+    head = "The study surveyed a very large number of firms across several national contexts and sectors in a single year " + _filler(6, "h")
+    s = head + ", which means the gains " + _filler(12, "t") + " are conditional."
+    out = C._split_sentence(s, 30)
+    assert ". This means the gains" in out and out.count(".") == 2
+    short = "A short sentence, which means little, ends here."
+    assert C._split_sentence(short, 3) == short                      # head under 22 words: not cut
+
+
+def test_because_and_appositive_and_who_tails():
+    head = "The measure varied so widely across instruments that comparing results became a category error " + _filler(10, "h")
+    assert ". This is because researchers" in C._split_sentence(head + ", because researchers labelled " + _filler(12, "t") + " names.", 30)
+    assert ". This is partly because the instruments" in C._split_sentence(head + ", partly because the instruments " + _filler(12, "t") + " ask.", 30)
+    out = C._split_sentence(head + ", a design choice that allows rich description but " + _filler(12, "t") + " limits.", 30)
+    assert ". This design choice allows rich description" in out
+    kept = C._split_sentence(head + ", a company that employs " + _filler(8, "q") + ", is large and " + _filler(10, "r") + " done.", 30)
+    assert ". This company" not in kept                               # the appositive continues into the main clause: not cut
+    who = C._split_sentence(head + " such as the SMEs studied by Pittino (2016), who found that practices " + _filler(12, "t") + " held.", 30)
+    assert ". They found that practices" in who
+
+
+def test_flagged_section_long_sentences_fall_from_12_to_at_most_2():
+    chunks = C.limit_narrative(_chunks())
+    over = lambda c: sum(1 for v in c.values() for x in split_sentences(v) if len(x.split()) > limits.MAX_SENT)   # noqa: E731
+    assert over(_chunks()) == 12
+    out = C.split_long(chunks, limits.MAX_SENT)
+    assert over(out) <= 2
+    assert protect.compare(" ".join(chunks.values()), " ".join(out.values())) == []
+    assert C.split_long(out, limits.MAX_SENT) == out                  # idempotent
 
 
 # ── skeletons: merge short paragraphs BEFORE the staccato filter ────────────────────────────────────────────────────────

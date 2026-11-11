@@ -20,7 +20,7 @@ _BLOCK = re.compile(r"\[(?:FIGURE|TABLE)_START\]|^\s*[|!<]", re.M)
 
 # the paragraph-level and sentence-level kinds, most urgent first
 PRIORITY = ("haiku_verify_patch", "flat_paragraph", "rhythm_monotony", "long_sentence", "narrative_surplus", "stock_idiom", "epilogue_closer",
-            "symmetric_hedge", "participial_tail", "vague_attribution", "nominalization_stack", "low_surprisal")
+            "symmetric_hedge", "participial_tail", "vague_attribution", "nominalization_stack")
 
 _CLOSE = re.compile(r"^(?:This (?:underscores|highlights|reflects|demonstrates|illustrates|points to|shows|reveals)\b|"
                     r"(?:Consequently|Thus|Therefore|Hence|As such|In this way|In turn),?\s)", re.I)
@@ -59,8 +59,6 @@ INSTRUCTIONS = {
                        "and give the limit as its own short sentence.",
     "participial_tail": "Cut the trailing -ing clause, or make it a short sentence of its own. Keep every fact and citation.",
     "vague_attribution": "Drop the 'has been studied' / 'researchers have noted' framing and state the claim directly. Add no citation.",
-    "low_surprisal": "A language model can guess this wording almost word for word: \"{found}\". Replace that stretch with specific, less expected "
-                     "wording (a concrete noun, an exact verb, the study's own term). Keep every fact, number and citation.",
     "nominalization_stack": "Too many abstract nouns: turn some back into verbs and name who does what. Keep every fact and citation.",
 }
 
@@ -150,22 +148,19 @@ def narrative_count(sent: str) -> int:
     return sum(1 for m in NARRATIVE_RE.finditer(sent) if sent[max(0, m.start() - 1):m.start()] != "(")
 
 
-def _ask(t: str, sent: str = "", phrase: str = "") -> str:
-    """The edit instruction for one span type; the idiom instruction names the phrases found, the surprisal one the predictable stretch."""
+def _ask(t: str, sent: str = "") -> str:
+    """The edit instruction for one span type; the idiom instruction names the phrases found."""
     ins = INSTRUCTIONS[t]
-    if t == "low_surprisal":
-        ins = ins.replace("{found}", phrase or sent[:80])
     if t == "stock_idiom":
         ins = ins.replace("{found}", "; ".join(dict.fromkeys(m.group(0) for m in _IDIOM.finditer(sent)))[:120])
     return ins
 
 
-def detect_ai_spans(text: str, patched=(), surprisal: dict | None = None) -> list[dict]:
+def detect_ai_spans(text: str, patched=()) -> list[dict]:
     """Spans to rewrite, most urgent first: [{kind: 'paragraph'|'sentence', text, types, para, instruction}].
     `patched` holds sentences the claim verifier rewrote (always queued). A flagged paragraph is one span; a paragraph with
     only sentence-level flags yields one span per flagged sentence. Headings, figure/table blocks and tables are skipped."""
     patched_n = {_norm(s) for s in patched or ()}
-    low_n = {_norm(x["text"]): x.get("predictable_span", "") for x in (surprisal or {}).get("low", [])}     # sentences a local language model finds predictable
     spans, nar = [], 0
     for i, para in enumerate(q.strip() for q in re.split(r"\n\s*\n", text or "") if q.strip()):
         if para.startswith("#") or _BLOCK.search(para):
@@ -174,8 +169,6 @@ def detect_ai_spans(text: str, patched=(), surprisal: dict | None = None) -> lis
         lengths = [len(s.split()) for s in sents]
         per = [sentence_types(s, last=(k == len(sents) - 1), n_sents=len(sents), patched=patched_n) for k, s in enumerate(sents)]
         for k, s in enumerate(sents):
-            if _norm(s) in low_n:
-                per[k].append("low_surprisal")
             nar += narrative_count(s)
             if narrative_count(s) and nar > NARRATIVE_CAP:
                 per[k].append("narrative_surplus")
@@ -193,6 +186,6 @@ def detect_ai_spans(text: str, patched=(), surprisal: dict | None = None) -> lis
         for s, ts in zip(sents, per):
             if ts:
                 ts = sorted(ts, key=PRIORITY.index)
-                spans.append({"kind": "sentence", "text": s, "types": ts, "para": i, "instruction": _ask(ts[0], s, low_n.get(_norm(s), ""))})
+                spans.append({"kind": "sentence", "text": s, "types": ts, "para": i, "instruction": _ask(ts[0], s)})
     spans.sort(key=lambda sp: (min(PRIORITY.index(t) for t in sp["types"]), sp["para"]))
     return spans

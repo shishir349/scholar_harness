@@ -2,7 +2,7 @@
 and the run that shows them (scripts/test_live_section.py)."""
 import json
 
-from harness import graph as G, llm
+from harness import graph as G, limits, llm
 from harness.corpus import skeletons as SK
 from harness.sources.tools import _telegraph, source_notes_for
 from harness.text import cleanup as C, lamp_rewrite as LR, protect
@@ -85,14 +85,14 @@ def test_more_than_two_narrative_citations_in_a_passage_are_flagged_with_their_p
     assert [(pos, i) for pos, i, _ in flags] == [("open", 2)] and G.narrative_count("Smith (2001) found it (Lee, 2004).") == 1
 
 
-def test_lamp_flags_narrative_citations_past_six_and_stock_idioms_and_names_the_phrase():
+def test_lamp_flags_narrative_citations_past_the_section_cap_and_stock_idioms_and_names_the_phrase():
     cites = "\n\n".join(sent(30, f"s{k}") + f" Writer{chr(97 + k)} ({2000 + k}) " + sent(7, f"t{k}") for k in range(8))
     spans = D.detect_ai_spans(cites + "\n\nThe model carries evidential weight in this field and sits at the intersection of theory and practice.")
     kinds = {t for s in spans for t in s["types"]}
     assert {"narrative_surplus", "stock_idiom"} <= kinds
     idiom = next(s for s in spans if "stock_idiom" in s["types"])
     assert "carries evidential weight" in idiom["instruction"]
-    assert sum("narrative_surplus" in s["types"] for s in spans) == 3
+    assert sum("narrative_surplus" in s["types"] for s in spans) == 8 - limits.NARR_SECTION
 
 
 # ── bug 3: repeats across open / mid / close ──────────────────────────────────────────────────────────────────────────

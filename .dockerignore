@@ -15,4 +15,3 @@ tasks
 __pycache__
 *.egg-info
 *.jsonl.gz
-!data/surprisal_baseline.json

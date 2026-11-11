@@ -1,10 +1,17 @@
 {
- "low": 3.551,
- "sentence_median": 4.455,
- "sentence_p85": 5.292,
- "paragraph_mean_median": 4.534,
- "paragraphs": 60,
- "sentences": 261,
+ "mean": 2.35,
+ "window": 1.75,
+ "human_flagged": 0.14,
+ "ai_flagged": 0.042,
+ "ai_sentences": 48,
+ "human_sentences": 435,
+ "human_paragraphs": 100,
  "model": "distilgpt2-int8",
- "unit": "nats per token"
+ "unit": "nats per unmasked token",
+ "human_median_mean": 4.061,
+ "ai_median_mean": 4.526,
+ "human_median_window": 2.662,
+ "ai_median_window": 3.031,
+ "human_median_lstr": 0.476,
+ "ai_median_lstr": 0.382
 }

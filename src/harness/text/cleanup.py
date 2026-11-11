@@ -63,7 +63,7 @@ def _short_para(p: str, min_sents: int = MIN_SENTS, min_words: int = MIN_WORDS) 
 MAX_MERGED_WORDS = 200      # a merge never builds a paragraph longer than this; a lone short paragraph is left rather than bloat one
 
 
-def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: int = MIN_WORDS) -> dict:
+def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: int = MIN_WORDS, max_words: int = MAX_MERGED_WORDS) -> dict:
     """Join body paragraphs under MIN_SENTS sentences or MIN_WORDS words so no 1-2 sentence filler block survives: first a run of
     short ones together, then each one still short into the neighbour it fits with (the shorter, never past MAX_MERGED_WORDS).
     Headings, tables, lists and figure blocks are left alone."""
@@ -72,7 +72,7 @@ def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: 
         before = [x.strip() for x in paras(chunks[pos])]
         res: list[str] = []
         for p in before:                      # 1. runs of short paragraphs become one
-            if res and _short_para(p, min_sents, min_words) and _short_para(res[-1], min_sents, min_words) and len((res[-1] + " " + p).split()) <= MAX_MERGED_WORDS:
+            if res and _short_para(p, min_sents, min_words) and _short_para(res[-1], min_sents, min_words) and len((res[-1] + " " + p).split()) <= max_words:
                 res[-1] += " " + p
             else:
                 res.append(p)
@@ -84,7 +84,7 @@ def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: 
             w = len(res[i].split())
             prev = res[i - 1] if i > 0 and not _BLOCKISH.match(res[i - 1]) else None
             nxt = res[i + 1] if i + 1 < len(res) and not _BLOCKISH.match(res[i + 1]) else None
-            fits = [(len(n.split()), k) for k, n in (("prev", prev), ("next", nxt)) if n is not None and len(n.split()) + w <= MAX_MERGED_WORDS]
+            fits = [(len(n.split()), k) for k, n in (("prev", prev), ("next", nxt)) if n is not None and len(n.split()) + w <= max_words]
             if not fits:
                 i += 1
                 continue
@@ -489,9 +489,27 @@ def drop_micro(chunks: dict) -> dict:
     return out
 
 
-_NARR_OPEN = re.compile(r"^((?:[A-Z][\w'\u2019-]+(?: et al\.)?)(?: (?:and|&) [A-Z][\w'\u2019-]+)?) \(((?:19|20)\d\d[a-z]?)\) "
-                        r"(?:also |then |further )?(?:found|noted|argued|showed|reported|observed|suggested|demonstrated|concluded|"
-                        r"identified|stated|claimed|reveal(?:ed)?|indicated|highlighted) that (.+?)([.!?])$")
+_NM = r"[A-Z][\w'\u2019-]+"
+_AUTH = rf"({_NM}(?: et al\.)?(?:(?:, {_NM})*,? (?:and|&) {_NM})?)"          # Smith | Smith and Lee | Smith, Lee, and Wu | Smith et al.
+_YEAR = r"\(((?:19|20)\d\d[a-z]?)\)"
+_SAY = (r"(?:argued|noted|found|showed|demonstrated|observed|reported|suggested|claimed|emphasi[sz]ed|pointed out|established|concluded|"
+        r"described|identified|proposed|stated|maintained|contended|highlighted|reveal(?:ed)?|indicated|asserted|explained|stressed|acknowledged)")
+_SAY_BARE = r"(?:argued|noted|found|showed|observed|suggested|concluded|reported|claimed|stated|indicated|demonstrated)"   # may omit "that" before a clause
+_DET = r"(?:the|a|an|this|these|those|there|it|its|their|such|most|many|both|no|all|some|each|any)"
+_STUDY = (r"(?:conducted|undertook|carried out|performed|completed|examined|surveyed|reviewed|analy[sz]ed|studied|investigated|interviewed|measured|"
+          r"tested|compared|explored|assessed|evaluated)")
+_ALSO = r"(?:also |then |further |independently |later |similarly )?"
+_END = r"([.!?])$"
+_NARR_OPEN = re.compile(rf"^{_AUTH} {_YEAR} {_ALSO}{_SAY} that (.+?){_END}")                                       # A: Smith (2010) found that X.
+_NARR_BARE = re.compile(rf"^{_AUTH} {_YEAR} {_ALSO}{_SAY_BARE} ((?:{_DET}) .+?){_END}")       # A2: Smith (2010) noted the field had X.
+_NARR_STUDY = re.compile(rf"^{_AUTH} {_YEAR} ({_STUDY}) (.+?) and {_ALSO}{_SAY} (?:that |(?={_DET} ))(.+?){_END}")   # C: Smith (2010) surveyed 235 firms and found that X.
+_NARR_AS = re.compile(rf"^{_AUTH} {_YEAR} (described|defined|characteri[sz]ed|conceptuali[sz]ed|framed|viewed|conceived|portrayed|depicted|treated) "
+                      rf"(.{{2,60}}?) as (.+?){_END}")                                                              # D: Smith (2010) described X as Y.
+_PAST = (r"(?:\w+ed|found|drew|showed|took|saw|built|held|made|gave|ran|wrote|grew|led|began|set|put|laid|sought|"
+         r"distinguished|pointed|stressed|argued|noted|identified)")
+_NARR_LEAD = re.compile(rf"^{_AUTH} {_YEAR} ({_ALSO}{_PAST} .+)$")                                                  # E: Smith (2010) pushed the field by X.
+_NARR_BY = re.compile(rf"\b(?:by|from) {_AUTH} {_YEAR}(?!,? (?:who|which|whose|whom)\b)")                          # H: ... noted by Smith (2010), applies
+_NARR_MID = re.compile(rf", as {_AUTH} {_YEAR} {_SAY},")                                                            # B: ..., as Smith (2010) argued, ...
 _PAREN_ITEM = re.compile(r"[A-Z][\w'\u2019-]+(?: et al\.?| (?:&|and) [A-Z][\w'\u2019-]+)?,\s*(?:19|20)\d\d[a-z]?")
 _PAREN_GROUP = re.compile(r"\(([^()]*(?:19|20)\d\d[^()]*)\)")
 
@@ -500,13 +518,52 @@ def _narr(x: str) -> int:
     return sum(1 for m in NARRATIVE_RE.finditer(x) if x[max(0, m.start() - 1):m.start()] != "(")
 
 
-def _restate(x: str):
-    """'Smith (2010) found that X.' -> 'X (Smith, 2010).'  None when the sentence is not that plain pattern."""
-    m = _NARR_OPEN.match(x.strip())
-    if not m or _narr(x) != 1:
+def _tag(who: str, year: str) -> str:
+    return f"{who.replace(' and ', ' & ')}, {year}"
+
+
+def _cap(x: str) -> str:
+    return f"{x[:1].upper()}{x[1:]}"
+
+
+def _restate(x: str, lead: str = ""):
+    """'Smith (2010) found that X.' -> 'X (Smith, 2010).'  Also: noted/found + clause without "that"; 'surveyed N firms and found that X'
+    (the study description moves into the parenthesis when it holds a number, else it is dropped); 'described X as Y' (-> 'X was described as Y');
+    a mid-sentence ', as Smith (2010) argued,' or 'noted by Smith (2010)'; with `lead`, last resort: 'Smith (2010) pushed X.' ->
+    'A study (Smith, 2010) pushed X.'. None when the sentence is none of these (the validator still reports it).
+    Every citation, number and name survives: protect.compare stays clean."""
+    x = x.strip()
+    if _narr(x) != 1:
         return None
-    body = m.group(3)
-    return f"{body[:1].upper()}{body[1:]} ({m.group(1).replace(' and ', ' & ')}, {m.group(2)}){m.group(4)}"
+    m = _NARR_MID.search(x)
+    if m:
+        return x[:m.start()] + f" ({_tag(m.group(1), m.group(2))})" + x[m.end():]
+    m = _NARR_OPEN.match(x)
+    if m:
+        return f"{_cap(m.group(3))} ({_tag(m.group(1), m.group(2))}){m.group(4)}"
+    m = _NARR_STUDY.match(x)
+    if m:
+        desc, claim = m.group(4), m.group(5)
+        tag = _tag(m.group(1), m.group(2))
+        if re.search(r"\d", desc):
+            tag += f"; {m.group(3)} {desc}"
+        return f"{_cap(claim)} ({tag}){m.group(6)}"
+    m = _NARR_BARE.match(x)
+    if m:
+        return f"{_cap(m.group(3))} ({_tag(m.group(1), m.group(2))}){m.group(4)}"
+    m = _NARR_AS.match(x)
+    if m:
+        obj = m.group(4)
+        verb = {"conceptualised": "conceptualised", "conceptualized": "conceptualized"}.get(m.group(3), m.group(3))
+        be = "were" if re.search(r"[a-z]s$", obj) and not re.search(r"(?:ss|us|is)$", obj) else "was"
+        return f"{_cap(obj)} {be} {verb} as {m.group(5)} ({_tag(m.group(1), m.group(2))}){m.group(6)}"
+    m = _NARR_BY.search(x)
+    if m and m.start() > 0:
+        return x[:m.start()].rstrip() + f" ({_tag(m.group(1), m.group(2))})" + x[m.end():]
+    m = _NARR_LEAD.match(x)
+    if m and lead:
+        return f"{lead} ({_tag(m.group(1), m.group(2))}) {m.group(3)}"
+    return None
 
 
 def limit_narrative(chunks: dict, per_call: int = limits.NARR_CALL, per_section: int = limits.NARR_SECTION,
@@ -519,26 +576,34 @@ def limit_narrative(chunks: dict, per_call: int = limits.NARR_CALL, per_section:
     doc = {pos: [x[0] for x in ps] for pos, ps in doc.items()}
     where = [(pos, i, j) for pos in POSITIONS for i, sents in enumerate(doc[pos]) for j, x in enumerate(sents) if _narr(x)]
 
-    def flip(k):
+    def flip(k, last_resort=False):
         pos, i, j = k
-        new = _restate(doc[pos][i][j])
+        x = doc[pos][i][j]
+        new = _restate(x) or (_restate(x, "A study") if last_resort else None)
         if new:
             doc[pos][i][j] = new
         return bool(new)
 
+    def over(ks, limit):                                            # flip from the end, skipping what cannot be restated, until within `limit`
+        for last_resort in (False, True):                           # the plain patterns first; "A study (Smith, 2010) verbed" only if still over
+            left = [k for k in ks if _narr(doc[k[0]][k[1]][k[2]])]
+            for k in reversed(left):
+                if len(left) <= limit:
+                    return
+                if flip(k, last_resort):
+                    left.remove(k)
+
     for pos in POSITIONS:                                           # 1. per passage
-        for k in [w for w in where if w[0] == pos][per_call:]:
-            flip(k)
-    left = [w for w in where if _narr(doc[w[0]][w[1]][w[2]])]
-    for k in left[per_section:]:                                    # 2. per section
-        flip(k)
+        over([w for w in where if w[0] == pos], per_call)
+    over(where, per_section)                                        # 2. per section
     left = [w for w in where if _narr(doc[w[0]][w[1]][w[2]])]
     paren = sum(len(_PAREN_ITEM.findall(g)) for pos in POSITIONS for sents in doc[pos] for x in sents for g in _PAREN_GROUP.findall(x))
-    for k in reversed(left):                                        # 3. parenthetical share
-        if paren / max(1, paren + len(left)) >= paren_share:
-            break
-        if flip(k):
-            paren, left = paren + 1, [w for w in left if w != k]
+    for last_resort in (False, True):                               # 3. parenthetical share
+        for k in reversed(list(left)):
+            if paren / max(1, paren + len(left)) >= paren_share:
+                break
+            if flip(k, last_resort):
+                paren, left = paren + 1, [w for w in left if w != k]
     out = dict(chunks)
     for pos in POSITIONS:
         ps = paras(chunks[pos])

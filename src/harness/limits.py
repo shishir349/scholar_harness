@@ -12,5 +12,6 @@ NARR_CALL = 2             # "Author (Year) verb ..." sentences per call (open / 
 NARR_SECTION = 5          # ...and per section
 PAREN_SHARE = 0.70        # at least this share of citations are parenthetical
 DUP_JACCARD = 0.35        # content-word overlap at which two sentences of one section say the same thing
-SURPRISAL_LOW = 3.6       # nats/token under which a sentence is "predictable" (default until scripts/calibrate_surprisal.py writes data/surprisal_baseline.json)
 SURPRISAL_GAIN = 0.4      # a rewrite of a low-surprisal sentence must raise its mean by at least this
+SURPRISAL_MEAN = 3.4       # nats/token (unmasked prose tokens): a sentence mean under this reads as predictable. Calibrated by scripts/calibrate_surprisal.py
+SURPRISAL_WINDOW = 1.8     # ...or any 6 consecutive unmasked tokens averaging under this

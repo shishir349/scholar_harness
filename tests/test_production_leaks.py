@@ -73,13 +73,15 @@ def test_merge_short_paragraphs_takes_the_spec_arguments_and_folds_into_a_neighb
     assert C.merge_short_paragraphs(two, min_sents=3, min_words=80) != two and C.merge_short_paragraphs(two, min_words=70) == two
 
 
-def test_a_mined_skeleton_is_dropped_when_any_body_paragraph_is_short():
-    ok = "\n\n".join(para(38, 7, 33, 9, tag=t) for t in ("a", "b", "c"))
-    short = ok + "\n\n" + para(30, 8, tag="s")
-    assert SK.skeleton_of(ok, "methodology", "mid", "1_0") is not None
-    assert SK.skeleton_of(short, "methodology", "mid", "1_1") is None                    # a 2-sentence paragraph
-    thin = "\n\n".join([para(30, 8, 12, tag="a")] + [para(38, 7, 33, 9, tag=t) for t in ("b", "c")])      # 3 sentences but 50 words
-    assert SK.skeleton_of(thin, "methodology", "mid", "1_2") is None
+def test_a_short_paragraph_is_merged_into_its_neighbour_before_the_skeleton_filter():
+    BR = chr(10) * 2
+    ok = BR.join(para(38, 7, 33, 9, tag=t) for t in ("a", "b", "c"))
+    short = ok + BR + para(30, 8, tag="s")                                          # a 2-sentence paragraph: merged, not a reason to drop the chunk
+    thin = BR.join([para(30, 8, 12, tag="a")] + [para(38, 7, 33, 9, tag=t) for t in ("b", "c", "d")])      # 3 sentences but 50 words: merged too
+    for i, text in enumerate((ok, short, thin)):
+        sk = SK.skeleton_of(text, "methodology", "mid", f"1_{i}")
+        assert sk is not None and all(len(p["sentence_lengths"]) >= L.MIN_SENTS and p["word_count"] >= L.MIN_SKELETON_WORDS for p in sk["paragraphs"])
+    assert SK.skeleton_of(para(30, 8, tag="s") + BR + para(30, 8, tag="t"), "methodology", "mid", "1_3") is None    # nothing left to build a skeleton from
 
 
 def test_the_shipped_skeleton_file_holds_no_short_paragraph():

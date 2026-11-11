@@ -5,7 +5,7 @@ instruction per span. Every returned span is then checked on the spot; a span th
 edit never costs the section. Runs after claim verification: protect.compare guarantees no citation, number or quote moves."""
 import re
 
-from .. import llm
+from .. import config, llm
 from ..corpus import lamp_bank
 from ..validate import surprisal
 from .. import limits
@@ -63,24 +63,26 @@ def _check(sp: dict, new, grams: set) -> str | None:
     return None
 
 
-def _gain(sp: dict, new: str, scorer, low: float) -> str | None:
-    """Local check for a sentence span flagged as predictable: the rewrite must read less predictable to the language model."""
+def _gain(sp: dict, new: str, scorer, low: float, window: float) -> str | None:
+    """Local check for a sentence span flagged as predictable: the rewrite's unmasked tokens must read less predictable (mean up by
+    SURPRISAL_GAIN) and its most predictable 6-token stretch must not get worse. Only the old and the new sentence are scored."""
     if "low_surprisal" not in sp["types"] or sp["kind"] != "sentence" or not new.strip():
         return None
-    r_old, r_new = surprisal.score_section_surprisal(sp["text"], scorer, low), surprisal.score_section_surprisal(new, scorer, low)
-    if r_old is None or r_new is None:
+    old, cur = surprisal.score_section_surprisal(sp["text"], scorer, low, window), surprisal.score_section_surprisal(new, scorer, low, window)
+    if old is None or cur is None:
         return None
-    return None if r_new["mean"] >= r_old["mean"] + limits.SURPRISAL_GAIN else "surprisal not higher"
+    o, c = old["sentences"][0], cur["sentences"][0]
+    return None if c["mean"] >= o["mean"] + limits.SURPRISAL_GAIN and c["min_window"] >= o["min_window"] else "surprisal not higher"
 
 
 def lamp_rewrite_section(text: str, section_type: str, exemplars: list, spend=None, patched=(), max_spans: int = MAX_SPANS,
-                         scorer="auto", low: float | None = None, rounds: int = 2) -> tuple[str, dict]:
+                         scorer="auto", low: float | None = None, rounds: int = 2, window: float | None = None) -> tuple[str, dict]:
     """-> (text, report). `exemplars` is lamp_bank.load(); `patched` the sentences the claim verifier rewrote.
     `scorer` (default: the shared local surprisal scorer, None = off) adds predictable sentences to the spans and rejects a rewrite
     of one that does not read less predictable; round 2 retries only the spans rejected for that."""
-    scorer = surprisal.get_scorer() if scorer == "auto" else scorer
-    low = surprisal.low_threshold() if low is None else low
-    before = surprisal.score_section_surprisal(text, scorer, low)
+    if scorer == "auto":     # opt-in: HARNESS_SURPRISAL=on. Offline benchmark (scripts/offline_benchmark.py): flagged AI text is LESS predictable than human thesis text
+        scorer = surprisal.get_scorer() if config.get("HARNESS_SURPRISAL", "off").lower() == "on" else None
+    before = surprisal.score_section_surprisal(text, scorer, low, window) if scorer is not None else None
     found = detect_ai_spans(text, patched, before)
     spans = found[:max_spans]
     kinds: dict = {}
@@ -109,7 +111,7 @@ def lamp_rewrite_section(text: str, section_type: str, exemplars: list, spend=No
             break
         retry = []
         for i, (sp, new) in enumerate(zip(spans, data), 1):
-            why = _check(sp, new, grams) or (None if sp["text"] in out else "span not found") or (_gain(sp, new, scorer, low) if scorer else None)
+            why = _check(sp, new, grams) or (None if sp["text"] in out else "span not found") or (_gain(sp, new, scorer, before and before['threshold']['mean'], before and before['threshold']['window']) if scorer else None)
             if why:
                 if why == "surprisal not higher":
                     retry.append({**sp, "instruction": sp["instruction"] + " Your previous attempt was still predictable: change the vocabulary, not just the order."})
@@ -126,7 +128,7 @@ def lamp_rewrite_section(text: str, section_type: str, exemplars: list, spend=No
         if not spans:
             break
     out = re.sub(r"[ \t]+(?=\n|$)", "", out)
-    after = surprisal.score_section_surprisal(out, scorer, low)
+    after = surprisal.score_section_surprisal(out, scorer, low, window) if scorer is not None else None       # paragraph cache: only the edited paragraphs go through the model
     if after is not None:
         rep["surprisal_after"] = surprisal.summary(after)
     return out, rep

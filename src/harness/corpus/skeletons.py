@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .. import config, limits
 from ..text.citations import NARRATIVE_RE, PAREN_RE
-from ..text.cleanup import CLOSER
+from ..text.cleanup import CLOSER, merge_short_paragraphs
 from ..text.sentences import split_sentences
 from ..validate.features import _STOCK_RX
 from . import store
@@ -31,7 +31,8 @@ MAX_TARGET_SENT, SHORT_TARGET_SENT = 42, 10   # no sentence target above the fir
 MIN_SENT_CV = 0.38     # mean within-paragraph sentence-length variation of an elite skeleton
 KEEP_SHARE = 0.40      # top share of each (type, position) group by structural diversity
 MAX_KEEP = 2500
-MIN_KEEP_PER_GROUP = 5   # the strict paragraph filter leaves few chunks in some (type, position) groups; below 3, pick() has nothing to choose from
+MAX_MERGED = 220         # words a merged paragraph may reach before skeleton_of gives up on the chunk
+MIN_KEEP_PER_GROUP = 15  # the strict paragraph filter leaves few chunks in some (type, position) groups; below 3, pick() has nothing to choose from
 POOL = 12              # candidates nearest in length that one chapter draws from, so its sections differ
 
 # ── 1. heading re-classifier ──────────────────────────────────────────────────────────────────────────────────────────
@@ -127,6 +128,7 @@ def paragraph_shape(p: str) -> dict | None:
 
 def skeleton_of(text: str, section_type: str, position: str, sid: str) -> dict | None:
     """The shape of one chunk, or None when it has under MIN_PARAS body paragraphs. Keeps no words of `text`."""
+    text = merge_short_paragraphs({"open": text or "", "mid": "", "close": ""}, limits.MIN_SENTS, limits.MIN_SKELETON_WORDS, MAX_MERGED)["open"]   # a short paragraph joins its neighbour first; only a chunk that still has one is dropped
     paras = [x for x in (paragraph_shape(p) for p in _body(text)) if x]
     if any(len(p["sentence_lengths"]) < limits.MIN_SENTS or p["word_count"] < limits.MIN_SKELETON_WORDS for p in paras):
         return None          # a chunk with a staccato paragraph would teach the writer to produce one

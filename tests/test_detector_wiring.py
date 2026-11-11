@@ -23,10 +23,25 @@ def test_a_flagged_sentence_becomes_a_span_that_names_the_phrase_to_delete():
     assert not [s for s in LD.detect_ai_spans(TEXT) if "claude_style" in s["types"]]          # no scores, no span
 
 
-def test_structural_culprits_are_described_in_plain_words():
+@pytest.mark.parametrize("culprit,directive", [
+    ("avg_word_len", "Rewrite using concrete, everyday academic vocabulary; avoid heavy multi-syllabic nominalizations."),
+    ("commas>=5", "Split this compound sentence at the midpoint into two separate sentences."),
+    ("colon_semicolon", "Remove the colon/semicolon and structure as two independent sentences."),
+])
+def test_structural_culprits_become_explicit_directives_not_quoted_phrases(culprit, directive):
+    ask = LD.claude_ask([culprit])
+    assert directive in ask and '"' not in ask and culprit not in ask
+
+
+def test_literal_phrases_stay_forbidden_and_mix_with_directives():
+    ask = LD.claude_ask(["the field", "has not", "avg_word_len"])
+    assert '"the field"' in ask and '"has not"' in ask and "everyday academic vocabulary" in ask
+
+
+def test_structural_culprits_reach_the_span_instruction():
     r = [{"text": SENSE, "para": 0, "ai_prob": 0.9, "flagged": True, "culprit_phrases": ["commas>=6", "subordinators>=3"]}]
     ins = LD.detect_ai_spans(TEXT, claude=r)[0]["instruction"]
-    assert "commas" in ins and "which/where/while" in ins
+    assert "Split this compound sentence" in ins and "which/where/while" in ins
 
 
 def _run(monkeypatch, reply):

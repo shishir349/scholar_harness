@@ -59,8 +59,8 @@ INSTRUCTIONS = {
                        "and give the limit as its own short sentence.",
     "participial_tail": "Cut the trailing -ing clause, or make it a short sentence of its own. Keep every fact and citation.",
     "vague_attribution": "Drop the 'has been studied' / 'researchers have noted' framing and state the claim directly. Add no citation.",
-    "claude_style": "A local detector trained on Claude's own output flags this sentence. Delete these exact phrases and say the same thing "
-                    "another way: {found}. Keep every fact, number and citation.",
+    "claude_style": "A local detector trained on Claude's own output flags this sentence. {found} "
+                    "Say the same thing another way. Keep every fact, number and citation.",
     "nominalization_stack": "Too many abstract nouns: turn some back into verbs and name who does what. Keep every fact and citation.",
 }
 
@@ -150,16 +150,27 @@ def narrative_count(sent: str) -> int:
     return sum(1 for m in NARRATIVE_RE.finditer(sent) if sent[max(0, m.start() - 1):m.start()] != "(")
 
 
-_STRUCTURAL = {"commas": "commas", "comma_per_word": "commas", "subordinators": "which/where/while clauses", "colon_semicolon": "colons and semicolons",
-               "nominal_ratio": "abstract -tion/-ment nouns", "ing_clauses": "trailing -ing clauses", "passive_ratio": "passive voice",
-               "avg_word_len": "long words", "words": "sentence length", "nums": "figures", "cites": "citations"}
+_DIRECTIVE = {      # structural detector feature -> what the rewriter must do (never quoted as a phrase)
+    "avg_word_len": "Rewrite using concrete, everyday academic vocabulary; avoid heavy multi-syllabic nominalizations.",
+    "nominal_ratio": "Rewrite using concrete, everyday academic vocabulary; avoid heavy multi-syllabic nominalizations.",
+    "commas": "Split this compound sentence at the midpoint into two separate sentences.",
+    "comma_per_word": "Split this compound sentence at the midpoint into two separate sentences.",
+    "colon_semicolon": "Remove the colon/semicolon and structure as two independent sentences.",
+    "subordinators": "Cut the which/where/while clauses: make each one its own short sentence.",
+    "ing_clauses": "Cut the trailing -ing clause, or make it a short sentence of its own.",
+    "passive_ratio": "Use the active voice: name who did what.",
+    "words": "Shorten the sentence.",
+}
+_STRUCTURAL = _DIRECTIVE | {"nums": "", "cites": ""}     # recognised, no directive: never ask to drop a figure or citation
 
 
 def claude_ask(culprits: list[str]) -> str:
-    """The phrases (exact text) to delete and the structural habits to ease, in words a rewriter can act on."""
-    phrases = [f'"{c}"' for c in culprits if ">=" not in c and c not in _STRUCTURAL]
-    habits = list(dict.fromkeys(_STRUCTURAL.get(c.split(">=")[0], c.split(">=")[0]) for c in culprits if ">=" in c or c in _STRUCTURAL))
-    return "; ".join(phrases + ([f"also ease the {', '.join(habits)}"] if habits else [])) or "its stock phrasing"
+    """Exact phrases to delete (quoted) plus one explicit directive per structural feature; each directive once."""
+    feat = lambda c: c.split(">=")[0]
+    phrases = [f'"{c}"' for c in culprits if feat(c) not in _STRUCTURAL]
+    rules = list(dict.fromkeys(_DIRECTIVE[feat(c)] for c in culprits if feat(c) in _DIRECTIVE))
+    head = ["Delete these exact phrases (none may remain, in any form): " + "; ".join(phrases) + "."] if phrases else []
+    return " ".join(head + rules) or "Rewrite without its stock phrasing."
 
 
 def _ask(t: str, sent: str = "", phrase: str = "") -> str:
@@ -206,7 +217,7 @@ def detect_ai_spans(text: str, patched=(), claude=None) -> list[dict]:
             span = {"kind": "paragraph", "text": para, "types": alltypes, "para": i}
             if hit:
                 culprits = list(dict.fromkeys(c for r in hit for c in r["culprit_phrases"]))[:5]
-                asks.append("Also delete these exact Claude phrases: " + claude_ask(culprits) + ".")
+                asks.append(claude_ask(culprits))
                 span.update(culprits=culprits, ai_prob=max(r["ai_prob"] for r in hit))
             spans.append({**span, "instruction": " ".join(asks)})
             continue
@@ -217,7 +228,7 @@ def detect_ai_spans(text: str, patched=(), claude=None) -> list[dict]:
                 culprits = r["culprit_phrases"] if r else []
                 ask = _ask(ts[0], s, claude_ask(culprits))
                 if r and ts[0] != "claude_style":
-                    ask += " Also delete these exact Claude phrases: " + claude_ask(culprits) + "."
+                    ask += " " + claude_ask(culprits)
                 span = {"kind": "sentence", "text": s, "types": ts, "para": i, "instruction": ask}
                 if r:
                     span.update(culprits=culprits, ai_prob=r["ai_prob"])

@@ -86,6 +86,25 @@ def test_dropping_repeated_summaries_first_then_limiting_leaves_few_narrative_ci
     assert K.section_violations(out)["narrative_section"] <= 6
 
 
+def test_pipeline_drops_repeats_before_it_limits_narrative_citations(monkeypatch):
+    from harness import graph
+    monkeypatch.setenv("HARNESS_SHAPE", "on")
+    out = graph._split_long(_chunks())
+    v = K.section_violations(out)
+    assert v["narrative_section"] <= limits.NARR_SECTION + 1 and v["paren_share"] >= 0.6          # 21 narrative -> 5, at most 1 over for LAMP
+
+
+def test_split_long_runs_drop_repeats_strictly_first(monkeypatch):
+    from harness import graph
+    monkeypatch.setenv("HARNESS_SHAPE", "on")
+    order = []
+    real_d, real_l = C.drop_repeats, C.limit_narrative
+    monkeypatch.setattr(C, "drop_repeats", lambda *a, **k: (order.append("drop"), real_d(*a, **k))[1])
+    monkeypatch.setattr(C, "limit_narrative", lambda *a, **k: (order.append("limit"), real_l(*a, **k))[1])
+    graph._split_long(_chunks())
+    assert order[:2] == ["drop", "limit"]
+
+
 # ── long sentences ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def _filler(n, tag="x"):
     return " ".join(f"{tag}{k}" for k in range(n))

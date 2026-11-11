@@ -295,11 +295,16 @@ def _merge_short(chunks: dict) -> dict:
     return chunks if config.get("HARNESS_SHAPE", "on").lower() == "off" else cleanup.merge_short(chunks)
 
 
-def _split_long(chunks: dict) -> dict:
-    """cleanup.split_long, switchable (HARNESS_SPLIT_LONG=off) for fixtures whose sentences are long by construction."""
+def _abstracts(refs) -> list:
+    return [r["abstract"] for r in refs or [] if isinstance(r, dict) and r.get("abstract")]
+
+
+def _split_long(chunks: dict, abstracts=()) -> dict:
+    """drop_repeats, then split_long, then limit_narrative, switchable (HARNESS_SHAPE=off) for fixtures whose sentences are long by construction.
+    drop_repeats goes FIRST: a restated or pasted sentence deleted afterwards would leave its narrative citation counted (21 -> 5 on the flagged section)."""
     if config.get("HARNESS_SHAPE", "on").lower() == "off":
         return chunks
-    return cleanup.limit_narrative(cleanup.split_long(cleanup.drop_micro(chunks), MAX_SENT_WORDS))
+    return cleanup.limit_narrative(cleanup.split_long(cleanup.drop_micro(cleanup.drop_repeats(chunks, abstracts)[0]), MAX_SENT_WORDS))
 
 
 def narrative_count(sentence: str) -> int:
@@ -901,7 +906,7 @@ def build_graph(deps: Deps):
         vfloor = _floor(ptype0, "para_len_cv") if pool_on else None
         if pool_on:
             chunks = cleanup.heal(chunks)             # chunk seams: "remains.The", an orphan lowercase fragment, a cut-off last sentence
-            chunks = _merge_short(_split_long(chunks))      # no 1-2 sentence staccato paragraph, no 43+ word sentence reaches the checks below
+            chunks = _merge_short(_split_long(chunks, _abstracts(state["refs"])))      # no 1-2 sentence staccato paragraph, no 43+ word sentence reaches the checks below
         if vfloor:
             chunks = _vary(chunks, vfloor)
         text = _joined(chunks)
@@ -1328,7 +1333,7 @@ def write_section(request: dict, deps: Deps) -> dict:
     c = state["chunks"]
     text = c["open"] + c["mid"] + c["close"]
     if (request.get("flags") or {}).get("pool", True) and state["profile"]["id"] != "appendix":
-        c = _merge_short(_split_long(c))   # no 1-2 sentence paragraph and no 43+ word sentence reaches the span detector
+        c = _merge_short(_split_long(c, _abstracts(state.get("refs", []))))   # no 1-2 sentence paragraph and no 43+ word sentence reaches the span detector
         c, state["reports"]["lamp"] = _lamp_tail(c, state, deps)    # after the claim check, before the free rewrites
         c = cleanup.heal(c)                       # the claim fix can leave a seam or a restated sentence too
         c, _ = cleanup.drop_repeats(c, [r["abstract"] for r in state.get("refs", []) if isinstance(r, dict) and r.get("abstract")])

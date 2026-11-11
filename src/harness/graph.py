@@ -124,6 +124,7 @@ VOICE_RULES = (
     "(pivotal, intricate, delve, showcase, underscore, interplay), \"serves as\" for \"is\", \", highlighting the importance of\" riders, "
     "formulaic connectives (\"Furthermore,\", \"The picture becomes more complex still\", \"remains genuinely contested\")."
 )
+_FIX_NOTE = re.compile(r"cannot be verified|\b(?:source|the) abstract\b|\bis not supported by\b|\bthe abstract (?:does|only|addresses|deals)\b", re.I)
 _FORMULAIC = re.compile("|".join([
     r"\bthe (?:problem|picture|question|difficulty|issue|challenge) (?:becomes|grows|gets) (?:even )?"
     r"(?:clearer|more complex|more nuanced|sharper)(?: still)?",
@@ -1118,7 +1119,9 @@ def build_graph(deps: Deps):
             return state["chunks"], 0
         chunks, fixed = dict(state["chunks"]), 0
         for c, new in zip(bad, data):
-            loc = _locate(chunks, c["sentence"]) if isinstance(new, str) and new.strip() else None
+            # the fixer sometimes answers with a note about the source ("The source abstract addresses ... This claim cannot be
+            # verified.") instead of a sentence; that is never thesis text, so the sentence stays for the delete pass
+            loc = _locate(chunks, c["sentence"]) if isinstance(new, str) and new.strip() and not _FIX_NOTE.search(new) else None
             if loc:
                 pos, a, b = loc
                 chunks[pos] = chunks[pos][:a] + new.strip() + chunks[pos][b:]

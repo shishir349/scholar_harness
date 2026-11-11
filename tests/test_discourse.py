@@ -1,3 +1,4 @@
+import json
 import re
 
 from harness import graph as G
@@ -156,3 +157,15 @@ def test_history_and_blocks_are_ignored_on_scholars_own_path():
     models(["a", "b", "c"])
     G.write_section(request(memory_block="MEMBLOCK", section_history=HIST), G.Deps(baseline={}))
     assert not any("MEMBLOCK" in p or "EARLIER SECTIONS" in p for p in PROMPTS[:3])
+
+
+def test_a_note_about_the_source_is_never_pasted_into_the_text():
+    from .test_graph import SOURCES
+    claim = "Cloud firms doubled their output (Smith, 2019)."
+    note = "The source abstract addresses caesarean section rates, not cloud firms. This claim cannot be verified."
+    models([claim + "\n\n", "B one.\n\n", "C one."],
+           haiku=['[{"id": 1, "verdict": "UNSUPPORTED", "reason": "off topic"}]', json.dumps([note]),
+                  '[{"id": 1, "verdict": "UNSUPPORTED", "reason": "off topic"}]'] + ['[{"id": 1, "verdict": "UNSUPPORTED", "reason": "x"}]'] * 4)
+    out = G.write_section(request(flags={"pool": False, "sources": True, "revise": True}, ledger={"sources": SOURCES, "by_section": {}}), G.Deps(baseline={}))
+    assert "cannot be verified" not in out["text"] and "source abstract" not in out["text"]
+    assert "Cloud firms doubled" not in out["text"]              # the unbacked sentence was deleted instead

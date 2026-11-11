@@ -3,6 +3,8 @@
 rewrite can fix. Paragraph indexes match graph.py: blank-line split, empty parts removed."""
 import re
 
+from .. import limits
+from .citations import NARRATIVE_RE, first_author
 from .sentences import split_sentences
 
 POSITIONS = ("open", "mid", "close")
@@ -30,9 +32,122 @@ def _content(s: str) -> frozenset:
     return frozenset(w for w in re.findall(r"[a-z]{3,}", s.lower()) if w not in _STOP)
 
 
-def same_idea(a: frozenset, b: frozenset) -> bool:
+SECTION_DUP = limits.DUP_JACCARD      # the same test across the whole assembled section (open + mid + close)
+MIN_SENTS, MIN_WORDS = limits.MIN_SENTS, limits.MIN_WORDS     # a body paragraph with fewer sentences or words is a staccato filler block
+_BLOCKISH = re.compile(r"^\s*(?:#|\||!\[|[-*•]\s|\d+[.)]\s|\[(?:FIGURE|TABLE)_)")
+
+
+def same_idea(a: frozenset, b: frozenset, thr: float = SAME_IDEA) -> bool:
     """Two sentences with at least five distinct content words and a large overlap."""
-    return len(a) >= 5 and len(b) >= 5 and len(a & b) / len(a | b) >= SAME_IDEA
+    return len(a) >= 5 and len(b) >= 5 and len(a & b) / len(a | b) >= thr
+
+
+def _frame(s: str):
+    """(first author, year, the word after the citation) of a sentence's narrative citation: 'Brown and Dueñas (2019) noted'."""
+    m = NARRATIVE_RE.search(s)
+    if not m:
+        return None
+    nxt = s[m.end():].split()
+    return (first_author(m.group(1)).lower(), m.group(2), nxt[0].lower().strip(",;") if nxt else "")
+
+
+def _works(s: str) -> set:
+    """{(first author, year)} the sentence summarises narratively ("Smith (2010) found ..."), not cites in parentheses."""
+    return {(first_author(m.group(1)).lower(), m.group(2)) for m in NARRATIVE_RE.finditer(s) if s[max(0, m.start() - 1):m.start()] != "("}
+
+
+def _short_para(p: str, min_sents: int = MIN_SENTS, min_words: int = MIN_WORDS) -> bool:
+    return not _BLOCKISH.match(p) and (len(split_sentences(p)) < min_sents or len(p.split()) < min_words)
+
+
+MAX_MERGED_WORDS = 200      # a merge never builds a paragraph longer than this; a lone short paragraph is left rather than bloat one
+
+
+def merge_short_paragraphs(chunks: dict, min_sents: int = MIN_SENTS, min_words: int = MIN_WORDS) -> dict:
+    """Join body paragraphs under MIN_SENTS sentences or MIN_WORDS words so no 1-2 sentence filler block survives: first a run of
+    short ones together, then each one still short into the neighbour it fits with (the shorter, never past MAX_MERGED_WORDS).
+    Headings, tables, lists and figure blocks are left alone."""
+    out = dict(chunks)
+    for pos in POSITIONS:
+        before = [x.strip() for x in paras(chunks[pos])]
+        res: list[str] = []
+        for p in before:                      # 1. runs of short paragraphs become one
+            if res and _short_para(p, min_sents, min_words) and _short_para(res[-1], min_sents, min_words) and len((res[-1] + " " + p).split()) <= MAX_MERGED_WORDS:
+                res[-1] += " " + p
+            else:
+                res.append(p)
+        i = 0
+        while i < len(res):                   # 2. a short paragraph still left joins the neighbour it fits with
+            if not _short_para(res[i], min_sents, min_words):
+                i += 1
+                continue
+            w = len(res[i].split())
+            prev = res[i - 1] if i > 0 and not _BLOCKISH.match(res[i - 1]) else None
+            nxt = res[i + 1] if i + 1 < len(res) and not _BLOCKISH.match(res[i + 1]) else None
+            fits = [(len(n.split()), k) for k, n in (("prev", prev), ("next", nxt)) if n is not None and len(n.split()) + w <= MAX_MERGED_WORDS]
+            if not fits:
+                i += 1
+                continue
+            if min(fits)[1] == "prev":
+                res[i - 1] += " " + res[i]
+                del res[i]
+            else:
+                res[i + 1] = res[i] + " " + res[i + 1]
+                del res[i]
+        if res != before:
+            out[pos] = _rebuild(chunks[pos], res)
+    return out
+
+
+merge_short = merge_short_paragraphs
+
+
+_SPLIT_AT = re.compile(r"(?:; |, (?:and|but|yet|so|while|whereas) )")
+_FINITE = re.compile(r"\b(?:is|are|was|were|be|been|has|have|had|do|does|did|can|could|may|might|will|would|must|should|means|requires?|"
+                     r"depends?|remains?|reflects?|makes?|allows?|produces?|shows?|holds?|creates?|carries|rests?|sits?|needs?)\b", re.I)
+
+
+def _split_sentence(s: str, limit: int) -> str:
+    """One sentence over `limit` words cut at the clause boundary nearest its middle: '; ' or ', and/but/yet/so/while/whereas '
+    outside any bracket, both halves at least 9 words, the second with a finite verb (so a list's last item is never cut off).
+    The conjunction is dropped. Returns the sentence unchanged when no such boundary exists."""
+    if len(s.split()) <= limit:
+        return s
+    depth, cuts = 0, []
+    for m in re.finditer(r"[()]|; |, (?:and|but|yet|so|while|whereas) ", s):
+        if m.group(0) == "(":
+            depth += 1
+        elif m.group(0) == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            head, tail = s[:m.start()], s[m.end():]
+            if len(head.split()) >= 9 and len(tail.split()) >= 9 and _FINITE.search(tail) and head.count("(") == head.count(")"):
+                cuts.append((abs(len(head.split()) - len(tail.split())), m, head, tail))
+    if not cuts:
+        return s
+    _, m, head, tail = min(cuts, key=lambda c: c[0])
+    conj = m.group(0).strip(" ,;")
+    tail = tail[:1].upper() + tail[1:] if conj in ("and", "but", "yet", "so", "") else tail[:1].upper() + tail[1:]
+    return _split_sentence(head.rstrip(" ,;") + ". ", limit).rstrip() + " " + _split_sentence(tail, limit)
+
+
+def split_long(chunks: dict, limit: int = 42) -> dict:
+    """Free: cut every sentence over `limit` words at a clause boundary (see _split_sentence). Citations, numbers and quotes are
+    untouched (only a conjunction or semicolon is replaced by a full stop). Headings and blocks are skipped."""
+    out = dict(chunks)
+    for pos in POSITIONS:
+        ps = paras(chunks[pos])
+        changed = False
+        for i, p in enumerate(ps):
+            if _BLOCKISH.match(p):
+                continue
+            sents = split_sentences(p)
+            new = [_split_sentence(x, limit) for x in sents]
+            if new != sents:
+                ps[i], changed = " ".join(new), True
+        if changed:
+            out[pos] = _rebuild(chunks[pos], ps)
+    return out
 
 
 def _grams(s: str) -> set:
@@ -86,19 +201,20 @@ def drop_repeats(chunks: dict, abstracts=()) -> tuple[dict, list]:
     previous paragraph, as long as the paragraph keeps two sentences. Returns (chunks, [(pos, idx)] of pasted sentences that
     could not be deleted, for a rewrite)."""
     src = set().union(*(_grams(a) for a in abstracts)) if abstracts else set()
-    out, left, prev = dict(chunks), [], []
+    out, left, seen, frames, works = dict(chunks), [], [], set(), set()    # kept so far in the WHOLE section; works: narrative (author, year)
     for pos in POSITIONS:
         ps = paras(chunks[pos])
         changed = False
         for i, p in enumerate(ps):
             if p.startswith("#"):
-                prev = []
                 continue
             sents = split_sentences(p)
             keep, here = [], []
             for j, s in enumerate(sents):
-                c = _content(s)
-                dup = len(s.split()) >= 8 and any(same_idea(c, o) for o in here + prev)
+                c, fr = _content(s), _frame(s)
+                long = len(s.split()) >= 8
+                ay = _works(s)
+                dup = long and (any(same_idea(c, o, SECTION_DUP) for o in here + seen) or (fr is not None and fr in frames) or bool(ay & works))
                 paste = bool(src) and copied_from(s, src)
                 if (dup or paste) and len(keep) + len(sents) - j - 1 >= 2 and not (paste and FIGURE.search(s)):
                     continue                    # a pasted sentence with a figure is reworded by the patch, never deleted: the number stays
@@ -106,9 +222,12 @@ def drop_repeats(chunks: dict, abstracts=()) -> tuple[dict, list]:
                     left.append((pos, i))
                 keep.append(s)
                 here.append(c)
+                if fr is not None:
+                    frames.add(fr)
+                works |= ay
             if len(keep) != len(sents):
                 ps[i], changed = " ".join(keep), True
-            prev = here
+            seen += here
         if changed:
             out[pos] = _rebuild(chunks[pos], ps)
     return out, sorted(set(left))
@@ -119,7 +238,7 @@ def repeat_flags(chunks: dict) -> dict:
     opens like one, 'I argue' announcements after the first, paragraphs ending on a verdict line, and 'What ...' openers
     (real theses: 2% of paragraphs, AI drafts: 11-14%)."""
     out = {"repeat": [], "stance": [], "closer": [], "whatopen": []}
-    seen, stems, stance_n, what = [], {}, 0, []
+    seen, stems, stance_n, what, frames, works = [], {}, 0, [], {}, {}
     for pos in POSITIONS:
         for i, p in enumerate(paras(chunks[pos])):
             sents = split_sentences(p) if not p.startswith("#") else []
@@ -137,9 +256,18 @@ def repeat_flags(chunks: dict) -> dict:
             for s in sents:
                 c, stem = _content(s), " ".join(s.lower().split()[:5])
                 long = len(s.split()) >= 8
-                hit = next((o for o, c0 in seen if same_idea(c, c0)), None) if long else None
+                hit = next((o for o, c0 in seen if same_idea(c, c0, SECTION_DUP)), None) if long else None
+                fr = _frame(s)
+                if hit is None and long and fr is not None:
+                    hit = frames.get(fr)
+                if hit is None and long:
+                    hit = next((works[k] for k in _works(s) if k in works), None)
                 if hit is None and long and len(set(stem.split())) >= 4:
                     hit = stems.get(stem)
+                for k in _works(s):
+                    works.setdefault(k, s)
+                if fr is not None:
+                    frames.setdefault(fr, s)
                 if hit:
                     out["repeat"].append((pos, i, hit[:70]))
                     break
@@ -336,3 +464,88 @@ def polish(chunks: dict, that_limit: float | None = None) -> tuple[dict, dict]:
     if that_limit:
         chunks, counts["that"] = thin_that(chunks, that_limit)
     return chunks, counts
+
+
+_HAS_FACT = re.compile(r"\d|\([^)]*(?:19|20)\d\d|[a-z] [A-Z][a-z]")      # a figure, a citation, or a proper noun inside the sentence
+MICRO_WORDS = 4
+
+
+def drop_micro(chunks: dict) -> dict:
+    """Free: delete a rhetorical punch of MICRO_WORDS words or fewer ("It is not decoration." "Choice matters here.") that holds no
+    figure, citation or name, while its paragraph keeps three sentences. A writer told to include a short sentence stacks these."""
+    out = dict(chunks)
+    for pos in POSITIONS:
+        ps = paras(chunks[pos])
+        changed = False
+        for i, p in enumerate(ps):
+            if _BLOCKISH.match(p):
+                continue
+            sents = split_sentences(p)
+            keep = [x for x in sents if len(x.split()) > MICRO_WORDS or _HAS_FACT.search(x)]
+            if len(keep) != len(sents) and len(keep) >= MIN_SENTS:
+                ps[i], changed = " ".join(keep), True
+        if changed:
+            out[pos] = _rebuild(chunks[pos], ps)
+    return out
+
+
+_NARR_OPEN = re.compile(r"^((?:[A-Z][\w'\u2019-]+(?: et al\.)?)(?: (?:and|&) [A-Z][\w'\u2019-]+)?) \(((?:19|20)\d\d[a-z]?)\) "
+                        r"(?:also |then |further )?(?:found|noted|argued|showed|reported|observed|suggested|demonstrated|concluded|"
+                        r"identified|stated|claimed|reveal(?:ed)?|indicated|highlighted) that (.+?)([.!?])$")
+_PAREN_ITEM = re.compile(r"[A-Z][\w'\u2019-]+(?: et al\.?| (?:&|and) [A-Z][\w'\u2019-]+)?,\s*(?:19|20)\d\d[a-z]?")
+_PAREN_GROUP = re.compile(r"\(([^()]*(?:19|20)\d\d[^()]*)\)")
+
+
+def _narr(x: str) -> int:
+    return sum(1 for m in NARRATIVE_RE.finditer(x) if x[max(0, m.start() - 1):m.start()] != "(")
+
+
+def _restate(x: str):
+    """'Smith (2010) found that X.' -> 'X (Smith, 2010).'  None when the sentence is not that plain pattern."""
+    m = _NARR_OPEN.match(x.strip())
+    if not m or _narr(x) != 1:
+        return None
+    body = m.group(3)
+    return f"{body[:1].upper()}{body[1:]} ({m.group(1).replace(' and ', ' & ')}, {m.group(2)}){m.group(4)}"
+
+
+def limit_narrative(chunks: dict, per_call: int = limits.NARR_CALL, per_section: int = limits.NARR_SECTION,
+                   paren_share: float = limits.PAREN_SHARE) -> dict:
+    """Free: turn "Smith (2010) found that X." into "X (Smith, 2010)." until a passage holds at most `per_call` narrative citations,
+    the section at most `per_section`, and at least `paren_share` of its citations are parenthetical. Latest sentences go first.
+    The citation, its words and every number are unchanged; only the order moves. A sentence that is not the plain pattern is left
+    alone (the validator still reports it)."""
+    doc = {pos: [[split_sentences(p) if not _BLOCKISH.match(p) else [p]] for p in paras(chunks[pos])] for pos in POSITIONS}
+    doc = {pos: [x[0] for x in ps] for pos, ps in doc.items()}
+    where = [(pos, i, j) for pos in POSITIONS for i, sents in enumerate(doc[pos]) for j, x in enumerate(sents) if _narr(x)]
+
+    def flip(k):
+        pos, i, j = k
+        new = _restate(doc[pos][i][j])
+        if new:
+            doc[pos][i][j] = new
+        return bool(new)
+
+    for pos in POSITIONS:                                           # 1. per passage
+        for k in [w for w in where if w[0] == pos][per_call:]:
+            flip(k)
+    left = [w for w in where if _narr(doc[w[0]][w[1]][w[2]])]
+    for k in left[per_section:]:                                    # 2. per section
+        flip(k)
+    left = [w for w in where if _narr(doc[w[0]][w[1]][w[2]])]
+    paren = sum(len(_PAREN_ITEM.findall(g)) for pos in POSITIONS for sents in doc[pos] for x in sents for g in _PAREN_GROUP.findall(x))
+    for k in reversed(left):                                        # 3. parenthetical share
+        if paren / max(1, paren + len(left)) >= paren_share:
+            break
+        if flip(k):
+            paren, left = paren + 1, [w for w in left if w != k]
+    out = dict(chunks)
+    for pos in POSITIONS:
+        ps = paras(chunks[pos])
+        new = [" ".join(sents) if not _BLOCKISH.match(ps[i]) else ps[i] for i, sents in enumerate(doc[pos])]
+        if new != ps:
+            out[pos] = _rebuild(chunks[pos], new)
+    return out
+
+
+demote_narrative = limit_narrative

@@ -13,7 +13,7 @@ import statistics
 from functools import lru_cache
 from pathlib import Path
 
-from .. import config
+from .. import config, limits
 from ..text.citations import NARRATIVE_RE, PAREN_RE
 from ..text.cleanup import CLOSER
 from ..text.sentences import split_sentences
@@ -25,9 +25,13 @@ TYPES = ("introduction", "literature_review", "methodology", "findings", "discus
 MIN_PARAS = 3          # body paragraphs a chunk needs to yield a skeleton
 MIN_PARA_WORDS = 20    # shorter lines are captions, list items, headings
 MAX_SENT = 90
+MIN_SENTS_PER_PARA = limits.MIN_SENTS   # a body paragraph under this many sentences, or MIN_WORDS_PER_PARA words, is merged into its neighbour in scale()
+MIN_WORDS_PER_PARA = limits.MIN_WORDS
+MAX_TARGET_SENT, SHORT_TARGET_SENT = 42, 10   # no sentence target above the first; every paragraph gets one target under the second
 MIN_SENT_CV = 0.38     # mean within-paragraph sentence-length variation of an elite skeleton
 KEEP_SHARE = 0.40      # top share of each (type, position) group by structural diversity
 MAX_KEEP = 2500
+MIN_KEEP_PER_GROUP = 5   # the strict paragraph filter leaves few chunks in some (type, position) groups; below 3, pick() has nothing to choose from
 POOL = 12              # candidates nearest in length that one chapter draws from, so its sections differ
 
 # ── 1. heading re-classifier ──────────────────────────────────────────────────────────────────────────────────────────
@@ -124,6 +128,8 @@ def paragraph_shape(p: str) -> dict | None:
 def skeleton_of(text: str, section_type: str, position: str, sid: str) -> dict | None:
     """The shape of one chunk, or None when it has under MIN_PARAS body paragraphs. Keeps no words of `text`."""
     paras = [x for x in (paragraph_shape(p) for p in _body(text)) if x]
+    if any(len(p["sentence_lengths"]) < limits.MIN_SENTS or p["word_count"] < limits.MIN_SKELETON_WORDS for p in paras):
+        return None          # a chunk with a staccato paragraph would teach the writer to produce one
     if len(paras) < MIN_PARAS or any(max(p["sentence_lengths"]) > MAX_SENT for p in paras):   # a 100-word "sentence" is a parse failure
         return None
     return {"skeleton_id": sid, "section_type": section_type, "position": position,
@@ -166,7 +172,7 @@ def build(con, min_score: float | None = None, keep_share: float = KEEP_SHARE, m
     elite, per = [], {}
     for key, items in sorted(groups.items()):
         items.sort(key=lambda s: (-diversity(s), s["skeleton_id"]))
-        top = items[:max(1, int(len(items) * keep_share))]
+        top = items[:max(MIN_KEEP_PER_GROUP, int(len(items) * keep_share))]
         per[f"{key[0]}/{key[1]}"] = [len(items), len(top)]
         elite += top
     elite = sorted(elite, key=lambda s: -diversity(s))[:max_keep]
@@ -211,7 +217,48 @@ def scale(sk: dict, words_target: int) -> list[dict]:
         wc = max(30, int(round(p["word_count"] * f, -1)))
         g = wc / max(1, sum(p["sentence_lengths"]))
         out.append({**p, "target_words": wc, "target_sentences": [max(4, round(n * g)) for n in p["sentence_lengths"]]})
-    return out
+    return [_shape(s) for s in _merge_short(out)]
+
+
+def _short_spec(s: dict) -> bool:
+    return len(s["target_sentences"]) < MIN_SENTS_PER_PARA or s["target_words"] < MIN_WORDS_PER_PARA
+
+
+def _join(a: dict, b: dict) -> dict:
+    """Paragraph spec `a` followed by `b` as one paragraph: sentences and words add up, `a` keeps its opener, `b` its closer."""
+    off = len(a["target_sentences"])
+    cs = a["cite_positions"]["sentences"] + [x + off for x in b["cite_positions"]["sentences"]]
+    mode = a["cite_positions"]["mode"] if a["cite_positions"]["mode"] != "none" else b["cite_positions"]["mode"]
+    return {**a, "target_words": a["target_words"] + b["target_words"], "target_sentences": a["target_sentences"] + b["target_sentences"],
+            "closer_type": b["closer_type"], "cite_positions": {"sentences": cs, "mode": mode if cs else "none"}}
+
+
+def _merge_short(specs: list[dict]) -> list[dict]:
+    """No 1-2 sentence or under-75-word paragraph: it joins the paragraph before it (or after it when it comes first). Real chunks
+    mined from a 450-word window are full of them; a writer told to write them produces staccato filler blocks."""
+    res: list[dict] = []
+    for s in specs:
+        if res and _short_spec(s):
+            res[-1] = _join(res[-1], s)
+        else:
+            res.append(s)
+    i = 0
+    while i < len(res) - 1:
+        if _short_spec(res[i]):
+            res[i + 1] = _join(res[i], res[i + 1])
+            del res[i]
+        else:
+            i += 1
+    return res
+
+
+def _shape(s: dict) -> dict:
+    """Sentence targets inside the bimodal limits: none above MAX_TARGET_SENT words, and one blunt target under SHORT_TARGET_SENT
+    (never the opening sentence) in every paragraph of three or more sentences."""
+    t = [min(n, MAX_TARGET_SENT) for n in s["target_sentences"]]
+    if len(t) >= MIN_SENTS_PER_PARA and min(t) >= SHORT_TARGET_SENT:
+        t[min(range(1, len(t)), key=lambda j: t[j])] = SHORT_TARGET_SENT - 2
+    return {**s, "target_sentences": t}
 
 
 _OPEN = {"author_narrative_cite": "a sentence that opens on a source (\"Smith (2010) found ...\")",
@@ -244,13 +291,15 @@ def blueprint(specs: list[dict]) -> str:
         lines.append(f"Paragraph {i}: about {s['target_words']} words in {len(sents)} sentence{"s" if len(sents) != 1 else ""} with target lengths "
                      f"{cadence(s)}.{note} Open with {_OPEN[s['opener_type']]}. {cite[0].upper() + cite[1:]}. "
                      f"End on {_END[s['closer_type']]}.")
+    lines.append(f"Every paragraph above has {MIN_SENTS_PER_PARA}+ sentences: never split one into short stand-alone paragraphs, "
+                 f"and keep every sentence at or under {MAX_TARGET_SENT} words.")
     lines.append("Keep each sentence length near its target and do not even them out: the contrast between long and short "
                  "sentences is part of the plan. The heading line is not counted.")
     return "\n\n" + "\n".join(lines)
 
 
 # ── 5. adherence ──────────────────────────────────────────────────────────────────────────────────────────────────────
-FLAT_STD = 6.0
+FLAT_STD = limits.STD_MIN
 
 
 def sent_std(p: str) -> float | None:

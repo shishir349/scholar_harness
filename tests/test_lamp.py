@@ -33,7 +33,7 @@ def test_flat_paragraph_that_section_wide_checks_miss_is_flagged_and_a_bimodal_o
     ok = para(40, 7, 36, 9, tag="beta")
     spans = D.detect_ai_spans(flat + "\n\n" + ok)
     assert [(s["kind"], s["para"]) for s in spans] == [("paragraph", 0)] and "flat_paragraph" in spans[0]["types"]
-    assert "32-45 word" in spans[0]["instruction"] and "[24, 27, 25, 28]" in spans[0]["instruction"]
+    assert "42 words" in spans[0]["instruction"] and "[24, 27, 25, 28]" in spans[0]["instruction"]
 
 
 def test_three_sentences_within_five_words_of_each_other_are_flagged_even_with_a_high_overall_spread():
@@ -187,8 +187,9 @@ def test_spans_are_capped_and_a_bad_reply_changes_nothing(monkeypatch):
     text = "\n\n".join(para(24, 27, 25, 28, tag=t) for t in ("a", "b", "c", "d", "e", "f", "g", "h"))
     seen = {}
     monkeypatch.setattr(llm, "ask", _ask("not json", seen))
-    out, rep = LR.lamp_rewrite_section(text, "introduction", EX, None)
+    out, rep = LR.lamp_rewrite_section(text, "introduction", EX, None, max_spans=6)
     assert out == text and rep["flagged"] == 8 and rep["sent"] == 6 and "error" in rep
+    assert LR.MAX_SPANS == 14
     assert seen["user"].count("(paragraph) Edit:") == 6
     monkeypatch.setattr(llm, "ask", _ask(json.dumps(["x"])))
     assert LR.lamp_rewrite_section(text, "introduction", EX, None)[0] == text            # wrong count

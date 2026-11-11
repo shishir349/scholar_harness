@@ -6,18 +6,21 @@ Pure code: no model calls."""
 import re
 import statistics
 
+from ..text.citations import NARRATIVE_RE
 from ..text.cleanup import CLOSER
 from ..text.sentences import split_sentences
+from .. import limits
+from .style import FLAT_STD, FRAGMENT_WORDS, MAX_SENT_WORDS, SHORT_SENT_WORDS, STACK_WORDS
 
-FLAT_STD = 6.5     # intra-paragraph sentence-length std below this (3+ sentences) is flat
 NEAR = 5           # three sentences in a row each within this many words of the one before are monotone
+NARRATIVE_CAP = limits.NARR_SECTION  # "Author (year) found ..." sentences a section may hold; later ones are rewritten with the citation in parentheses
 CITE = re.compile(r"\((?:[^()]*?)(?:19|20)\d\d[a-z]?\)")
 FIGURE = re.compile(r"(?<![\w.])(?!(?:19|20)\d\d[a-z]?\b)\d")
 _BLOCK = re.compile(r"\[(?:FIGURE|TABLE)_START\]|^\s*[|!<]", re.M)
 
 # the paragraph-level and sentence-level kinds, most urgent first
-PRIORITY = ("haiku_verify_patch", "flat_paragraph", "rhythm_monotony", "epilogue_closer", "symmetric_hedge", "participial_tail",
-            "vague_attribution", "nominalization_stack")
+PRIORITY = ("haiku_verify_patch", "flat_paragraph", "rhythm_monotony", "long_sentence", "narrative_surplus", "stock_idiom", "epilogue_closer",
+            "symmetric_hedge", "participial_tail", "vague_attribution", "nominalization_stack")
 
 _CLOSE = re.compile(r"^(?:This (?:underscores|highlights|reflects|demonstrates|illustrates|points to|shows|reveals)\b|"
                     r"(?:Consequently|Thus|Therefore|Hence|As such|In this way|In turn),?\s)", re.I)
@@ -27,17 +30,30 @@ _VAGUE = re.compile(r"\b(?:has|have) (?:been )?(?:extensively|widely|well|increa
                     r"found|pointed out)\b|\bit has been (?:argued|noted|suggested|shown|observed)\b|\bthe literature (?:suggests|indicates|shows)\b", re.I)
 _NOT_PARTICIPLE = frozenset("including according following during concerning regarding being nothing something anything "
                             "building training testing engineering ongoing existing".split())
+# Phrases a draft of section 3.1 leaned on: high-probability academic filler that a detector reads as machine prose.
+_IDIOM = re.compile(r"\b(?:carr(?:y|ies|ied) (?:\w+ )?(?:evidential|analytical|explanatory|considerable) weight|"
+                    r"sits? at the intersection of|not an? ?(?:neutral|value-free|innocent) (?:act|choice|stance)|resists? reduction to|"
+                    r"not a failure of (?:the )?\w+|in the sense that|a nuanced understanding|sheds? light on|at the heart of|"
+                    r"offers? a (?:lens|window) (?:on|onto|for)|speaks? to the (?:broader|wider)|a complex (?:interplay|web) of)\b", re.I)
 _NOMINAL = re.compile(r"\b[a-z]{3,}(?:tion|tions|ment|ments|ance|ances|ence|ences|ity|ities)\b", re.I)
 _NOMINAL_STOP = frozenset("question questions section sections position positions".split())
 
 INSTRUCTIONS = {
     "haiku_verify_patch": "A cheap model patched this sentence so it stays within its source. Keep its claim, numbers and citation exactly; "
                           "reword it and change its rhythm so it reads as the researcher's own sentence.",
-    "flat_paragraph": "The sentences are too even in length ({lengths}). Rework into a bimodal paragraph: join neighbours into one dense "
-                      "32-45 word multi-clause sentence and make another a blunt 5-9 word statement; no three sentences within 5 words "
-                      "of each other. Keep every fact, number and citation.",
+    "flat_paragraph": "The sentence lengths ({lengths}) break the pattern: no sentence may be longer than " + str(MAX_SENT_WORDS) +
+                      " words, one sentence must be a blunt 5-9 word statement inside the paragraph, and no three sentences may sit within 5 "
+                      "words of each other. Rework into a bimodal paragraph (dense multi-clause sentences beside the blunt one); keep it one "
+                      "paragraph. Keep every fact, number and citation.",
     "rhythm_monotony": "Three sentences in a row open and run alike. Change how two of them open and how long they are (one blunt, "
                        "one long and dense). Keep every fact, number and citation.",
+    "long_sentence": "This sentence is longer than " + str(MAX_SENT_WORDS) + " words. Split it into two sentences of under 40 words each "
+                     "(the citation may stay in one half or appear in both). Keep every fact, number and name.",
+    "narrative_surplus": "This sentence names an author as its subject, like a book report. State the claim yourself and put the "
+                         "citation in parentheses at its end (Author, year); better, set it against another source already cited nearby. "
+                         "Keep every citation and number.",
+    "stock_idiom": "Predictable academic phrasing ({found}). Say the same thing in direct, un-hedged technical language, with the "
+                   "concrete subject and verb. Keep every fact, number and citation.",
     "epilogue_closer": "This closing sentence only sums up. Reply with an empty string to delete it.",
     "symmetric_hedge": "Replace the balanced While/Although clause with a plain statement of the one point the evidence supports, "
                        "and give the limit as its own short sentence.",
@@ -61,11 +77,37 @@ def flat_note(lengths: list[int]) -> str | None:
         a, b, c = lengths[j:j + 3]
         if abs(a - b) <= NEAR and abs(b - c) <= NEAR:
             return f"sentences {j + 1}-{j + 3} run {a}, {b}, {c}"
+    if max(lengths) > MAX_SENT_WORDS:
+        return f"a {max(lengths)}-word sentence (limit {MAX_SENT_WORDS})"
+    if sum(1 for x in lengths if x < FRAGMENT_WORDS) >= 2 or any(all(x < STACK_WORDS for x in lengths[j:j + 3]) for j in range(len(lengths) - 2)):
+        return "stacked fragments"
+    if min(lengths) > SHORT_SENT_WORDS:
+        return f"no sentence of {SHORT_SENT_WORDS} words or fewer"
     return None
+
+
+def paragraph_note(lengths: list[int]) -> str | None:
+    """flat_note without the long-sentence test: a long sentence is a span of its own, not a reason to rewrite the paragraph."""
+    return flat_note([x for x in lengths if x <= MAX_SENT_WORDS])
+
+
+def violations(lengths: list[int]) -> int:
+    """How many rhythm rules these sentence lengths break (0 = clean): flat spread, a monotone run, sentences over the limit,
+    stacked fragments, no short sentence. A rewrite is accepted when it breaks fewer than the original did."""
+    if len(lengths) < 3:
+        return 0
+    n = int(statistics.pstdev(lengths) < FLAT_STD) + sum(1 for x in lengths if x > MAX_SENT_WORDS)
+    n += int(any(abs(a - b) <= NEAR and abs(b - c) <= NEAR for a, b, c in zip(lengths, lengths[1:], lengths[2:])))
+    n += int(sum(1 for x in lengths if x < FRAGMENT_WORDS) >= 2 or any(all(x < STACK_WORDS for x in lengths[j:j + 3]) for j in range(len(lengths) - 2)))
+    return n + int(min(lengths) > SHORT_SENT_WORDS)
 
 
 def paragraph_is_flat(text: str) -> bool:
     return flat_note([len(s.split()) for s in split_sentences(text)]) is not None
+
+
+def paragraph_violations(text: str) -> int:
+    return violations([len(s.split()) for s in split_sentences(text)])
 
 
 def _monotone(sents: list[str]) -> bool:
@@ -91,6 +133,10 @@ def sentence_types(sent: str, *, last: bool, n_sents: int, patched: set) -> list
         word = first[-1] if first and first[0].lower() in ("thereby", "thus", "hence") and len(first) > 1 else (first[0] if first else "")
         if re.fullmatch(r"[A-Za-z]{4,}ing", word) and word.lower() not in _NOT_PARTICIPLE:
             out.append("participial_tail")
+    if len(sent.split()) > MAX_SENT_WORDS:
+        out.append("long_sentence")
+    if _IDIOM.search(sent):
+        out.append("stock_idiom")
     if _VAGUE.search(sent) and not CITE.search(sent):
         out.append("vague_attribution")
     if len([w for w in _NOMINAL.findall(sent) if w.lower() not in _NOMINAL_STOP]) >= 4:
@@ -98,24 +144,41 @@ def sentence_types(sent: str, *, last: bool, n_sents: int, patched: set) -> list
     return out
 
 
+def narrative_count(sent: str) -> int:
+    return sum(1 for m in NARRATIVE_RE.finditer(sent) if sent[max(0, m.start() - 1):m.start()] != "(")
+
+
+def _ask(t: str, sent: str = "") -> str:
+    """The edit instruction for one span type; the idiom instruction names the phrases found."""
+    ins = INSTRUCTIONS[t]
+    if t == "stock_idiom":
+        ins = ins.replace("{found}", "; ".join(dict.fromkeys(m.group(0) for m in _IDIOM.finditer(sent)))[:120])
+    return ins
+
+
 def detect_ai_spans(text: str, patched=()) -> list[dict]:
     """Spans to rewrite, most urgent first: [{kind: 'paragraph'|'sentence', text, types, para, instruction}].
     `patched` holds sentences the claim verifier rewrote (always queued). A flagged paragraph is one span; a paragraph with
     only sentence-level flags yields one span per flagged sentence. Headings, figure/table blocks and tables are skipped."""
     patched_n = {_norm(s) for s in patched or ()}
-    spans = []
+    spans, nar = [], 0
     for i, para in enumerate(q.strip() for q in re.split(r"\n\s*\n", text or "") if q.strip()):
         if para.startswith("#") or _BLOCK.search(para):
             continue
         sents = split_sentences(para)
         lengths = [len(s.split()) for s in sents]
         per = [sentence_types(s, last=(k == len(sents) - 1), n_sents=len(sents), patched=patched_n) for k, s in enumerate(sents)]
-        note = flat_note(lengths)
+        for k, s in enumerate(sents):
+            nar += narrative_count(s)
+            if narrative_count(s) and nar > NARRATIVE_CAP:
+                per[k].append("narrative_surplus")
+        note = paragraph_note(lengths)
         types = (["flat_paragraph"] if note else []) + (["rhythm_monotony"] if _monotone(sents) else [])
         if types:
             more = sorted({t for ts in per for t in ts}, key=PRIORITY.index)
             alltypes = types + [t for t in more if t not in types]
-            asks = [INSTRUCTIONS[t].format(lengths=lengths) for t in alltypes[:2] if t != "epilogue_closer"]
+            asks = [INSTRUCTIONS[t].format(lengths=lengths) if t == "flat_paragraph" else _ask(t, para)
+                    for t in alltypes[:2] if t != "epilogue_closer"]
             if "epilogue_closer" in alltypes:
                 asks.append("Also cut the closing sentence that only sums the paragraph up, or end on its last concrete number or limitation.")
             spans.append({"kind": "paragraph", "text": para, "types": alltypes, "para": i, "instruction": " ".join(asks)})
@@ -123,6 +186,6 @@ def detect_ai_spans(text: str, patched=()) -> list[dict]:
         for s, ts in zip(sents, per):
             if ts:
                 ts = sorted(ts, key=PRIORITY.index)
-                spans.append({"kind": "sentence", "text": s, "types": ts, "para": i, "instruction": INSTRUCTIONS[ts[0]]})
+                spans.append({"kind": "sentence", "text": s, "types": ts, "para": i, "instruction": _ask(ts[0], s)})
     spans.sort(key=lambda sp: (min(PRIORITY.index(t) for t in sp["types"]), sp["para"]))
     return spans

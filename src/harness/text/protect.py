@@ -5,7 +5,7 @@ figure/table blocks, headings, paragraph count. Soft checks (reported only): hed
 import re
 from collections import Counter
 
-from .citations import extract_citations, first_author
+from .citations import NARRATIVE_RE, extract_citations, first_author
 
 NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 QUOTE = re.compile(r'"([^"\n]{4,})"|“([^”\n]{4,})”')
@@ -33,6 +33,13 @@ def _cites(text: str) -> set:
     return found
 
 
+def numbers(text: str) -> Counter:
+    """Every number except the years inside citations (those are guarded by _cites). A rewrite that splits a sentence may cite the
+    work in both halves; counting the year twice must not read as a changed number."""
+    plain = _GROUP.sub(lambda m: _ITEM.sub(" ", m.group(0)), text)
+    return Counter(NUMBER.findall(NARRATIVE_RE.sub(lambda m: m.group(1), plain)))
+
+
 def _paras(text: str) -> list[str]:
     return [p for p in re.split(r"\n\s*\n", text) if p.strip()]
 
@@ -53,7 +60,7 @@ def compare(before: str, after: str) -> list[str]:
     new = _cites(after) - _cites(before)
     if lost or new:
         out.append("citation changed: lost " + ", ".join(f"{a} {y}" for a, y in sorted(lost)) + "; added " + ", ".join(f"{a} {y}" for a, y in sorted(new)))
-    nb, na = Counter(NUMBER.findall(before)), Counter(NUMBER.findall(after))
+    nb, na = numbers(before), numbers(after)
     if nb != na:
         out.append("number changed: lost " + ", ".join(sorted((nb - na).elements())) + "; added " + ", ".join(sorted((na - nb).elements())))
     gone = [q for q in _quotes(before) if q not in after]

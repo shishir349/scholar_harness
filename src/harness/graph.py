@@ -9,14 +9,14 @@ from typing import Any, Callable, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
-from . import config, llm
+from . import config, limits, llm
 from .corpus import lamp_bank, retrieve, skeletons as SK
 from .prompts import sections as P
 from .sources.tools import _FIGURE, CITATION_RULES, facts_for, merge_refs, source_notes_for
 from .sources.verifier import audit_chapter
 from .spend import BudgetExceeded
 from .text import cleanup, lamp_rewrite, numbers
-from .text.citations import audit_citations, extract_citations, first_author, match_ref
+from .text.citations import NARRATIVE_RE, audit_citations, extract_citations, first_author, match_ref
 from .text.jsonparse import parse_json
 from .text.sentences import split_sentences
 from .text.strip import strip_for_style
@@ -25,7 +25,8 @@ from .validate.overlap import exemplar_ngrams, overlap_report, passage_overlaps
 from .validate.profile import avoid_hits, load_profile, plan_ratios, profile_block, signpost_counts
 from .corpus.profile import _citation_counts
 from .validate.gapfeats import CONNECTIVES, feats, short_sentences
-from .validate.style import burst_flags, feature_stats, score_section, style_target
+from .validate import constraints as gates
+from .validate.style import MAX_SENT_WORDS, SHORT_SENT_WORDS, burst_flags, feature_stats, score_section, style_target
 
 POSITIONS = ("open", "mid", "close")
 DRAFT_TEMPERATURE = float(config.get("HARNESS_DRAFT_TEMP", "0.8"))   # drafting and full rewrites; the claim checks stay at 0 (sources/verifier.py)
@@ -77,6 +78,18 @@ UNRESOLVED_FRICTION_MOVE = ("set two cited works or observations against each ot
                             "there: no neat synthesis, no sentence that reconciles them")
 ANACHRONY_MOVE = ("point back to an earlier section (by number), a figure or table (by its ID), or defer a boundary condition to a "
                   "later section, in one plain sentence")
+# Paragraph shape. A 1-2 sentence paragraph is a staccato filler block, and a 55-word compound sentence is a Claude tell.
+MIN_SENTS, MIN_PARA_WORDS = limits.MIN_SENTS, limits.MIN_WORDS
+MAX_NARRATIVE_PASSAGE, MAX_NARRATIVE_SECTION = limits.NARR_CALL, limits.NARR_SECTION
+PARA_RULE = (f"Every paragraph has at least {MIN_SENTS} sentences and {MIN_PARA_WORDS} words: never a one- or two-sentence paragraph. "
+             f"No sentence is longer than {MAX_SENT_WORDS} words, and every paragraph holds one blunt sentence of {SHORT_SENT_WORDS} words or fewer "
+             "inside it (not as a paragraph of its own). That blunt sentence is 6-9 words and states a fact (a figure, a named source, a "
+             "method detail); never a rhetorical punch (\"It is not decoration.\", \"Choice matters here.\"), never two sentences under 5 words "
+             "and never three short ones in a row.")
+CITE_FORM_RULE = (f"At most {MAX_NARRATIVE_PASSAGE} sentences per passage ({MAX_NARRATIVE_SECTION} per section) may name an author as the "
+                  "subject (\"Smith (2010) found ...\"). Cite everything else in parentheses at the end of a claim you state yourself, "
+                  "ideally one claim that sets two sources against each other (\"X holds in survey data but not in case studies (Smith, 2010; Lee, 2018)\"); "
+                  "never summarise sources one after another.")
 ANCHOR_RULE = "Put a concrete proper noun (a named author, study, instrument, dataset, place or standard) within its first six words."
 EPILOGUE_RULE = ("End on a specific number, a methodological limitation or a citation detail; no summary, no takeaway, no sentence that "
                  "says what it all means.")
@@ -110,7 +123,8 @@ VOICE_RULES = (
     "clearer, give a plain uncited example from ordinary practice in this field (\"for example, a sensor bolted to a bridge bearing "
     "sees ...\"), never as a finding, a figure or a named study you were not given. Compare sources on what really differs "
     "(design, sample, measure, setting, date). Prefer plain, exact words to impressive ones.\n"
-    "- Bimodal burstiness: " + BIMODAL + " Vary paragraph length. Do not use em dashes.\n"
+    "- Bimodal burstiness: " + BIMODAL + " " + PARA_RULE + " Vary paragraph length. Do not use em dashes.\n"
+    "- Citation form: " + CITE_FORM_RULE + "\n"
     "- Open a paragraph with its subject (\"The ...\", \"In ...\") or a case, never with \"What ...\" or a sweeping statement. End it on its "
     "last concrete point, not on a verdict, a one-line restatement or a saying. Do not force every paragraph into the same shape "
     "(claim, citation, limitation, gap); take a position where the evidence supports one and name a limitation only when the "
@@ -154,6 +168,12 @@ _FORMULAIC = re.compile("|".join([
     r":\s+[^,.;:()]{3,40}, [^,.;:()]{3,40}, and [^,.;:()]{3,40}[.;]",
     r"(?:^|(?<=[.!?] ))(?:Taken together|In summary|In conclusion|Overall),|\bis worth (?:noting|pinning down|highlighting)\b|\bworth noting\b",
     r"\bwhat (?:these|those|such) \w+(?: \w+)? share\b|\bthe appeal is obvious\b|\bopens? (?:up )?a path towards?\b",
+    # staccato micro-openers a section-3.1 draft leaned on, and the "in the sense that" stack
+    r"(?:^|(?<=[.!?] ))One (?:\w+ ){1,2}(?:stands|matters|applies|remains|deserves mention) here\b",
+    r"\bOne \w+ (?:limit|decision|constraint|point|issue) (?:stands|matters|remains|emerges)\b",
+    r"\bThe (?:design|choice|approach|sample|method|question|stance|position) (?:is|was) (?:now )?settled\b",
+    r"\b(?:Two|Three|Four|Several|Both) (?:phases|stages|steps|parts|strands) follow\b",
+    r"\bin the sense that\b",
 ]), re.I | re.M)
 # a sentence that opens with a narrative citation ("Smith (2010) found"); 3+ in a paragraph is a source-by-source chain
 _CHAIN = re.compile(r"(?:^|(?<=[.!?] ))[A-Z][\w'\u2019-]+(?: et al\.)?(?: (?:and|&) [A-Z][\w'\u2019-]+)? \((?:19|20)\d\d[a-z]?\)", re.M)
@@ -163,7 +183,7 @@ _CHAIN = re.compile(r"(?:^|(?<=[.!?] ))[A-Z][\w'\u2019-]+(?: et al\.)?(?: (?:and
 # prompts stay byte-identical for the golden tests. A text that is not found is a no-op.
 _SEEDS = (
     ("- Mix very short sentences (under 8 words) with long analytical ones. Include at least two short sentences per response",
-     "- " + BIMODAL),
+     "- " + BIMODAL + " " + PARA_RULE),
     ("- Use natural transitions instead: \"What matters here is\u2026\", \"In practice\u2026\", \"The issue becomes more complex when\u2026\", "
      "\"The literature rarely addresses\u2026\", \"That assumption does not hold in\u2026\", \"The problem emerges when\u2026\"",
      "- Use plain transitions (\"For example,\", \"However,\", \"In addition,\", \"As a result,\", \"In contrast,\") or none when the "
@@ -270,6 +290,38 @@ def _round(x: float, rng) -> int:
     return int(x) + (rng.random() < x - int(x))
 
 
+def _merge_short(chunks: dict) -> dict:
+    """cleanup.merge_short, switchable (HARNESS_MERGE_SHORT=off) for fixtures whose paragraphs are one sentence by construction."""
+    return chunks if config.get("HARNESS_SHAPE", "on").lower() == "off" else cleanup.merge_short(chunks)
+
+
+def _split_long(chunks: dict) -> dict:
+    """cleanup.split_long, switchable (HARNESS_SPLIT_LONG=off) for fixtures whose sentences are long by construction."""
+    if config.get("HARNESS_SHAPE", "on").lower() == "off":
+        return chunks
+    return cleanup.limit_narrative(cleanup.split_long(cleanup.drop_micro(chunks), MAX_SENT_WORDS))
+
+
+def narrative_count(sentence: str) -> int:
+    """'Smith (2010) found ...' style citations in a sentence (an author named as its subject), not '(Smith, 2010)'."""
+    return sum(1 for m in NARRATIVE_RE.finditer(sentence) if sentence[max(0, m.start() - 1):m.start()] != "(")
+
+
+def _narrative_surplus(chunks: dict, cap: int = MAX_NARRATIVE_PASSAGE) -> list[tuple]:
+    """[(pos, paragraph idx, note)] for the paragraphs holding a narrative citation beyond `cap` in one passage."""
+    out = []
+    for pos in POSITIONS:
+        n = 0
+        for i, p in enumerate(q for q in re.split(r"\n\s*\n", chunks[pos]) if q.strip()):
+            if p.lstrip().startswith("#"):
+                continue
+            k = sum(narrative_count(s) for s in split_sentences(p))
+            if k and n + k > cap:
+                out.append((pos, i, f"{n + k} narrative citations in this passage, limit {cap}"))
+            n += k
+    return out
+
+
 def _is_chain(para: str) -> bool:
     """Source-by-source summary: three sentences opening with a source, or two opening "Author (year) traces / notes / offers ..."."""
     return len(_CHAIN.findall(para)) >= 3 or sum(1 for s in split_sentences(para) if cleanup.REPORT.search(s)) >= 2
@@ -278,8 +330,23 @@ def _is_chain(para: str) -> bool:
 def _made(text: str) -> str:
     """Opening sentence of each paragraph written so far, so a later call does not make the same point again."""
     firsts = [s[0] for p in cleanup.paras(text) if not p.startswith("#") for s in [split_sentences(p)] if s]
-    return ("\nPOINTS ALREADY MADE (do not make any of these again, in any wording):\n"
-            + "\n".join("- " + " ".join(s.split()[:24]) for s in firsts[:10])) if firsts else ""
+    used = _cites_used(text)
+    return (("\nPOINTS ALREADY MADE (do not make any of these again, in any wording):\n"
+             + "\n".join("- " + " ".join(s.split()[:24]) for s in firsts[:10])) if firsts else "") + (
+        "\nALREADY_SUMMARIZED_SOURCES (hard ban: do not summarise any of these works again, in any wording or with any verb; cite one "
+        "again only in parentheses inside a new claim of your own):\n" + "\n".join(f"- {k}: {g}" for k, g in used[:12]) if used else "")
+
+
+def _cites_used(text: str) -> list[tuple[str, str]]:
+    """[(Author (Year), first words of the sentence that cited it)] in order, one per work, for the repetition ledger."""
+    seen: dict = {}
+    for p in cleanup.paras(text):
+        if p.startswith("#"):
+            continue
+        for s in split_sentences(p):
+            for c in extract_citations(s):
+                seen.setdefault((first_author(c["author"]).lower(), c["year"]), (f"{c['author']} ({c['year']})", " ".join(s.split()[:16])))
+    return list(seen.values())
 
 
 def _glue(chunks: dict) -> str:
@@ -410,7 +477,7 @@ def build_graph(deps: Deps):
         return {
             "profile": profile, "words_target": wt, "max_tokens": mt, "refs": refs, "ref_lines": _ref_lines(refs),
             "budgets": call_budgets(f"{state['thesis'].get('title')}|{chapter.get('title')}|{section.get('title')}", wt),
-            "notes": "\n\n".join(x for x in (source_notes_for(section, state["sources"], state.get("by_section")) if use_sources else "",
+            "notes": "\n\n".join(x for x in (source_notes_for(section, state["sources"], state.get("by_section"), telegraph=True) if use_sources else "",
                                              f"{material}\n\n{MATERIAL_RULES}" if material else "") if x),
             "rules": CITATION_RULES if use_sources else "",
             "facts": (facts_for(section, state["sources"], state.get("by_section")) if use_sources else [])
@@ -834,6 +901,7 @@ def build_graph(deps: Deps):
         vfloor = _floor(ptype0, "para_len_cv") if pool_on else None
         if pool_on:
             chunks = cleanup.heal(chunks)             # chunk seams: "remains.The", an orphan lowercase fragment, a cut-off last sentence
+            chunks = _merge_short(_split_long(chunks))      # no 1-2 sentence staccato paragraph, no 43+ word sentence reaches the checks below
         if vfloor:
             chunks = _vary(chunks, vfloor)
         text = _joined(chunks)
@@ -867,17 +935,18 @@ def build_graph(deps: Deps):
                     a = SK.adherence(chunks[pos], specs)
                     skel_rep[pos] = a["paragraphs"]
                     skel += [(pos, i, f"std {std}, plan {cad}") for i, std, cad in a["flat"]]
-        burst = []
+        burst, narcap = [], []
         if pool_on:
             flat_at = {(a, b) for a, b, _ in skel}
             burst = [(pos, i, note) for pos in POSITIONS for i, note in burst_flags(chunks[pos]) if (pos, i) not in flat_at]
+            narcap = _narrative_surplus(chunks)
         problems = {"voice": voice, "cites": cites, "chains": chains, "avoid": avoid, "signposts": signposts,
                     "narrative": narrative, "plain": plain, "unmatched": unmatched, "overlap": ov if ov["flagged"] else None,
                     "style": style if style.get("available") and not style.get("passed") else None,
                     "formulaic": stiff if stiff >= 2 else 0,   # one stock phrase is normal prose; a pattern is not
                     "citedpara": cited_p, "copied": pasted, "repeat": rep.get("repeat", []), "stance": rep.get("stance", []),
                     "closer": rep.get("closer", []), "whatopen": rep.get("whatopen", []),
-                    "numbers": figs, "examples": exs, "skeleton": skel, "burst": burst}
+                    "numbers": figs, "examples": exs, "skeleton": skel, "burst": burst, "narcap": narcap}
         reports = {"style": {k: v for k, v in style.items() if k != "features"}, "overlap": ov, "skeleton": skel_rep,
                    "citations": {"unmatched": unmatched}}
         grown = {"refs": refs, "ref_lines": state["ref_lines"] + [r["apa"] for r in added],
@@ -894,7 +963,7 @@ def build_graph(deps: Deps):
         bad = bool(p["unmatched"] or p["overlap"] or p["style"] or p.get("formulaic") or p.get("voice") or p.get("cites") or p.get("chains") or p.get("avoid")
                    or p.get("signposts") or p.get("narrative") or any((p.get("plain") or {}).values())
                    or p.get("citedpara") or p.get("copied") or p.get("repeat") or p.get("stance") or p.get("closer") or p.get("whatopen")
-                   or p.get("numbers") or p.get("examples") or p.get("skeleton") or p.get("burst"))
+                   or p.get("numbers") or p.get("examples") or p.get("skeleton") or p.get("burst") or p.get("narcap"))
         return "revise" if bad and flags.get("revise", True) and state["revisions"] == 0 else "verify"
 
     def _worst(state: S) -> str:
@@ -964,6 +1033,10 @@ def build_graph(deps: Deps):
                                    "cadence, a blunt short sentence next to a long clause; keep every fact, number and citation")
                 if (pos, i) in at("burst"):
                     reasons.append(f'has no bimodal burstiness ({at("burst")[(pos, i)]}): ' + BIMODAL + " Keep every fact, number and citation")
+                if (pos, i) in at("narcap"):
+                    reasons.append(f'names an author as the subject too often ({at("narcap")[(pos, i)]}): turn the "Author (year) found ..." '
+                                   "sentence into your own claim with the citation in parentheses at its end, ideally setting two sources against "
+                                   "each other in one claim; keep every citation and number")
                 pl = state["problems"].get("plain") or {}
                 if (pos, i) in set(pl.get("that") or []):
                     reasons.append('uses "that" ' + str(len(re.findall(r"\bthat\b", para, re.I))) + ' times: drop "that" wherever the '
@@ -1234,6 +1307,8 @@ def _lamp_tail(chunks: dict, state: dict, deps: Deps) -> tuple[dict, dict]:
             continue
         out[pos] = out[pos].replace(old, new, 1)
     rep["applied"] -= lost
+    rep["straddled_seam"] = lost
+    rep["accepted"] = rep["applied"]
     return out, rep
 
 
@@ -1253,11 +1328,14 @@ def write_section(request: dict, deps: Deps) -> dict:
     c = state["chunks"]
     text = c["open"] + c["mid"] + c["close"]
     if (request.get("flags") or {}).get("pool", True) and state["profile"]["id"] != "appendix":
+        c = _merge_short(_split_long(c))   # no 1-2 sentence paragraph and no 43+ word sentence reaches the span detector
         c, state["reports"]["lamp"] = _lamp_tail(c, state, deps)    # after the claim check, before the free rewrites
         c = cleanup.heal(c)                       # the claim fix can leave a seam or a restated sentence too
         c, _ = cleanup.drop_repeats(c, [r["abstract"] for r in state.get("refs", []) if isinstance(r, dict) and r.get("abstract")])
+        c = _merge_short(c)                # a repeat dropped from a 3-sentence paragraph can leave it short
         c, _ = cleanup.polish(c, _that_limit(state["profile"]["id"], deps.profile if deps.profile is not None else load_profile()))
         text = _tidy(_glue(c))
+        state["reports"]["constraints"] = gates.section_violations(c)    # CONSTRAINTS.md measured on what is returned; never hidden
     use_found = bool((request.get("flags") or {}).get("sources", True))
     found = (ledger.get("sources") or []) if use_found else []
     return {"text": text, "reports": state["reports"], "revisions": state["revisions"],

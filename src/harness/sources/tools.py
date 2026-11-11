@@ -108,15 +108,68 @@ def facts_for(section: dict, sources: list[dict], by_section: dict | None, limit
     return (figures + names)[:limit]
 
 
-def source_notes_for(section: dict, sources: list[dict], by_section: dict | None) -> str:
-    """What each mapped source actually reports (abstract start). Falls back to the top 6 by citations."""
+_SAMPLE = re.compile(r"\b(?:n\s*=\s*\d[\d,]*|\d[\d,]*\s+(?:[A-Za-z-]+\s+){0,2}(?:participants|respondents|employees|patients|firms|"
+                     r"studies|articles|papers|students|nurses|managers|cases|interviews|countries|hospitals|sites|samples?|observations|"
+                     r"organi[sz]ations|companies|schools|households|workers|teachers|farmers|bridges|sensors))\b", re.I)
+_METHOD = re.compile(r"\b(?:survey|questionnaire|interviews?|focus groups?|experiment\w*|trials?|regression|case stud(?:y|ies)|"
+                     r"ethnograph\w*|content analysis|thematic analysis|systematic review|meta-analysis|simulation|longitudinal|"
+                     r"cross-sectional|mixed[- ]methods?|qualitative|quantitative|grounded theory|structural equation\w*|ANOVA|"
+                     r"machine learning|deep learning|field study|panel data)\b", re.I)
+_RESULT = re.compile(r"\b(?:found|show(?:s|ed|n)?|reveal(?:s|ed)?|indicat\w+|results?|increas\w+|decreas\w+|improv\w+|reduc\w+|"
+                     r"associated|correlat\w+|signific\w+|predict\w+|higher|lower|effects?)\b", re.I)
+_LIMIT = re.compile(r"\b(?:limitations?|limited|small sample|future research|self-report\w*|generali[sz]\w+|caution)\b", re.I)
+_LEAD = re.compile(r"^(?:(?:this|the|our|these) (?:study|paper|article|research|review|results|findings|analysis)\s+(?:also )?"
+                   r"(?:found|shows?|showed|reveals?|revealed|indicates?|indicated|demonstrates?|suggests?)\s+(?:that\s+)?)", re.I)
+
+
+_SAID = re.compile(r"\b(?:found|shows?|showed|reveal(?:s|ed)?|indicat(?:es|ed)|demonstrat(?:es|ed))\s+that\s+(.+)", re.I)
+
+
+def _clip_words(s: str, n: int) -> str:
+    return " ".join(s.strip().rstrip(".").split()[:n])
+
+
+def _window(sentence: str, rx: re.Pattern, side: int = 5) -> str:
+    """The match plus `side` words either side: a limit named in a few words, not a whole abstract sentence."""
+    w = sentence.split()
+    for i, tok in enumerate(w):
+        if rx.search(tok):
+            return " ".join(w[max(0, i - side):i + side + 1]).strip(" .,;")
+    return ""
+
+
+def _telegraph(abstract: str) -> str:
+    """method / sample / finding / limit as short fragments, so the writer has facts to use and no abstract prose to copy or
+    lightly reword. Pure code. The claim check still reads the full abstract."""
+    sents = [x for x in _sentences(abstract) if x]
+    text = " ".join(sents)
+    methods = list(dict.fromkeys(m.group(0).lower() for m in _METHOD.finditer(text)))[:3]
+    sample = _SAMPLE.search(text)
+    results = [x for x in sents if _RESULT.search(x)]
+    best = next((x for x in results if _FIGURE.search(x)), results[0] if results else (sents[0] if sents else ""))
+    limit = next((_window(x, _LIMIT) for x in sents if _LIMIT.search(x)), "")
+    said = _SAID.search(best)
+    start = _RESULT.search(best)
+    finding = said.group(1) if said else best[start.start():] if start else best      # from the result on, never the abstract's opening clause
+    parts = [("method", ", ".join(methods)), ("sample", sample.group(0) if sample else ""),
+             ("finding", _clip_words(_LEAD.sub("", finding), 14)), ("limit", limit)]
+    return " | ".join(f"{k}: {v}" for k, v in parts if v)
+
+
+def source_notes_for(section: dict, sources: list[dict], by_section: dict | None, telegraph: bool = False) -> str:
+    """What each mapped source actually reports. Falls back to the top 6 by citations. `telegraph` gives key-value fragments
+    (method | sample | finding | limit) in place of the abstract's own sentences."""
     lines = []
     for s in sorted(_chosen(section, sources, by_section), key=lambda x: -(x.get("cited_by") or 0))[:MAX_NOTES]:
         if not s.get("abstract"):
             continue
         first = s["authors"].split(",")[0]
-        lines.append(f"- ({first}, {s['year']}): {_note(s['abstract'])}")
+        lines.append(f"- ({first}, {s['year']}): {_telegraph(s['abstract']) if telegraph else _note(s['abstract'])}")
     if not lines:
         return ""
+    if telegraph:
+        return ("SOURCE NOTES (facts only, as fragments: method | sample | finding | limit. Write every sentence yourself; never "
+                "rebuild a note into a sentence about that source, and make claims about a source only within its note):\n"
+                + "\n".join(lines))
     return ("SOURCE NOTES (what each source actually reports; make claims about a source only within this, in your own words):\n"
             + "\n".join(lines))

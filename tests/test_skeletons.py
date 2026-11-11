@@ -10,9 +10,10 @@ from harness.prompts import sections as P
 from .test_graph import GOLD, PROMPTS, clean, models, request  # noqa: F401  (clean: autouse fixture reused)
 
 # One paragraph: narrative cite in sentence 1, a blunt short sentence, a parenthetical cite, a figure to close on.
-VARIED = ("Smith (2010) measured soil moisture across forty plots over three growing seasons and found that the wettest plots "
-          "also carried the heaviest weed load. Rain mattered less. Where drainage was poor, the yield penalty grew with every "
-          "additional week of standing water, a pattern that held in both regions (Lee, 2015). Mean yield fell by 12 percent.")
+VARIED = ("Smith (2010) measured soil moisture across forty plots over three growing seasons on two research farms and found that the "
+          "wettest plots also carried the heaviest weed load in every season. Rain mattered less. Where drainage was poor, the yield penalty "
+          "grew with every additional week of standing water, a pattern that held in both regions and in each of the soil types "
+          "that the survey team sampled (Lee, 2015). Mean yield fell by 12 percent.")
 def flat(k):
     """A paragraph of four sentences of 15 words each (no spread), with words unique to k: drop_repeats deletes restated sentences."""
     return " ".join("The team " + " ".join(f"item{k}{j}{m}" for m in range(12)) + " finished." for j in range(4))

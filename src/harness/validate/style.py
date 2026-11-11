@@ -6,11 +6,16 @@ from functools import lru_cache
 from pathlib import Path
 
 from .. import config
+from .. import limits
 from ..text.sentences import split_sentences
 from ..text.strip import headings_and_text, strip_for_style
 from .features import FEATURES, ONE_SIDED_HIGH, style_features
 
-FLAT_STD = 6.0       # same floor corpus/skeletons.py uses for a flat paragraph
+FLAT_STD = limits.STD_MIN              # a paragraph of 3+ sentences with a sentence-length std under this is flat
+MAX_SENT_WORDS = limits.MAX_SENT       # a longer sentence is a compound Claude sentence ("... in the sense that ... and in the sense that ...")
+SHORT_SENT_WORDS = limits.SHORT_MAX    # every paragraph of 3+ sentences holds a sentence of this many words or fewer
+FRAGMENT_WORDS = limits.FRAGMENT       # ...but two sentences under this are stacked fragments ("The data are numerical. The variables are defined.")
+STACK_WORDS = limits.STACK             # ...as are three short sentences in a row
 BASELINE_PATH = config.DATA / "style_baseline.json"
 
 
@@ -167,6 +172,12 @@ def burst_flags(text: str) -> list[tuple[int, str]]:
         run = next((j for j in range(len(n) - 2) if all(18 <= x <= 26 for x in n[j:j + 3])), None)
         if run is not None:
             out.append((i, f"sentences {run + 1}-{run + 3} run {n[run]}, {n[run + 1]}, {n[run + 2]} words"))
-        elif len(n) >= 4 and statistics.pstdev(n) < FLAT_STD:
-            out.append((i, f"sentence lengths {n} barely vary"))
+        elif statistics.pstdev(n) < FLAT_STD:
+            out.append((i, f"sentence lengths {n} barely vary (std {statistics.pstdev(n):.1f}, need {FLAT_STD})"))
+        elif max(n) > MAX_SENT_WORDS:
+            out.append((i, f"a {max(n)}-word sentence, the limit is {MAX_SENT_WORDS}"))
+        elif sum(1 for x in n if x < FRAGMENT_WORDS) >= 2 or any(all(x < STACK_WORDS for x in n[j:j + 3]) for j in range(len(n) - 2)):
+            out.append((i, f"sentence lengths {n}: stacked fragments, keep one blunt {FRAGMENT_WORDS}-9 word sentence"))
+        elif min(n) > SHORT_SENT_WORDS:
+            out.append((i, f"sentence lengths {n}: none of {SHORT_SENT_WORDS} words or fewer"))
     return out

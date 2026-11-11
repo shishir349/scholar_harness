@@ -7,18 +7,22 @@ import re
 
 from .. import llm
 from ..corpus import lamp_bank
-from ..validate.lamp_detector import detect_ai_spans, paragraph_is_flat
+from ..validate.lamp_detector import MAX_SENT_WORDS, detect_ai_spans, paragraph_violations
+from ..text.sentences import split_sentences
 from ..validate.features import _STOCK_RX
 from ..validate.overlap import exemplar_ngrams, passage_overlaps
 from . import protect
 from .jsonparse import parse_json
 
-MAX_SPANS = 6
+MAX_SPANS = 14
 TEMPERATURE = 0.85
 N_EXAMPLES = 8
 SYSTEM = ("You edit thesis prose at the level of single sentences and paragraphs. Match the rhythm of the human examples (a dense, "
           "multi-clause sentence beside a blunt short one; a paragraph that stops on a fact) without reusing their words or topic. "
-          "Never change a citation, a number, a quotation or a name, and never add one.")
+          "Also break predictable wording: replace stock academic phrasing (\"carries evidential weight\", \"sits at the intersection of\", "
+          "\"not a neutral act\", \"resists reduction to\", \"not a failure of the paradigm\", \"in the sense that\") with direct, un-hedged "
+          "technical language that names who did what. You may split a long cited sentence into two; the citation may stay in one half "
+          "or appear in both. Never change a citation, a number, a quotation or a name, and never add one.")
 
 
 def _prompt(spans: list[dict], examples: list[dict]) -> str:
@@ -43,8 +47,10 @@ def _check(sp: dict, new, grams: set) -> str | None:
     bad = protect.compare(sp["text"], new)
     if bad:
         return bad[0]
-    if sp["kind"] == "paragraph" and paragraph_is_flat(new):
-        return "still flat"
+    if sp["kind"] == "paragraph" and paragraph_violations(new) >= paragraph_violations(sp["text"]):
+        return "still flat"          # not better than the original: it breaks as many rhythm rules as before
+    if "long_sentence" in sp["types"] and any(len(x.split()) > MAX_SENT_WORDS for x in split_sentences(new)):
+        return "still over the sentence limit"
     if passage_overlaps(new, grams):
         return "copies an example"
     if _STOCK_RX.search(new) and not _STOCK_RX.search(sp["text"]):
@@ -63,11 +69,12 @@ def lamp_rewrite_section(text: str, section_type: str, exemplars: list, spend=No
     for sp in found:
         for t in sp["types"]:
             kinds[t] = kinds.get(t, 0) + 1
-    rep = {"flagged": len(found), "sent": len(spans), "applied": 0, "rejected": [], "kinds": kinds, "edits": []}   # edits: (old, new) pairs
+    rep = {"flagged": len(found), "sent": len(spans), "applied": 0, "rejected": [], "rejected_by": {}, "kinds": kinds, "edits": [],
+           "sent_words": sum(len(sp["text"].split()) for sp in spans)}   # edits: (old, new) pairs; rejected_by: reason -> count
     if not spans:
         return text, rep
     examples = lamp_bank.pick(exemplars, section_type, N_EXAMPLES)
-    budget = min(4000, 300 + int(2 * sum(len(sp["text"].split()) for sp in spans)))
+    budget = min(9000, 300 + int(2.2 * sum(len(sp["text"].split()) for sp in spans)))
     data = parse_json(llm.ask("sonnet", SYSTEM, _prompt(spans, examples), max_tokens=budget, spend=spend, temperature=TEMPERATURE))
     if not isinstance(data, list) or len(data) != len(spans):
         rep["error"] = "reply did not parse into one string per span"
@@ -78,6 +85,8 @@ def lamp_rewrite_section(text: str, section_type: str, exemplars: list, spend=No
         why = _check(sp, new, grams) or (None if sp["text"] in out else "span not found")
         if why:
             rep["rejected"].append({"span": i, "types": sp["types"], "why": why})
+            key = re.sub(r"[:\d].*$", "", why).strip() or why
+            rep["rejected_by"][key] = rep["rejected_by"].get(key, 0) + 1
             continue
         out = out.replace(sp["text"], new.strip(), 1)
         rep["edits"].append((sp["text"], new.strip()))

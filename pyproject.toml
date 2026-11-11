@@ -18,6 +18,8 @@ dependencies = [
 # corpus build only (PyMuPDF is AGPL: never part of the runtime image)
 corpus = ["pymupdf4llm==1.28.2"]
 dev = ["pytest==9.1.1"]
+# local surprisal scorer (validate/surprisal.py); without it the step is skipped. Also needs data/models/{gpt2-q.onnx,tokenizer.json}
+surprisal = ["onnxruntime==1.30.0", "numpy==2.5.3", "tokenizers"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

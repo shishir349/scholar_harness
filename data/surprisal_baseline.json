@@ -1,0 +1,10 @@
+{
+ "low": 3.551,
+ "sentence_median": 4.455,
+ "sentence_p85": 5.292,
+ "paragraph_mean_median": 4.534,
+ "paragraphs": 60,
+ "sentences": 261,
+ "model": "distilgpt2-int8",
+ "unit": "nats per token"
+}

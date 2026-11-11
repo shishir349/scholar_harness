@@ -13,3 +13,6 @@ build/
 # corpus pack = third-party thesis text, never commit
 *.jsonl.gz
 corpus-pack*
+
+# local surprisal model (downloaded, ~127MB)
+data/models/

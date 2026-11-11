@@ -7,6 +7,7 @@ data/*
 !data/fields.selected.json
 !data/human_skeletons.json
 !data/lamp_span_examples.json
+!data/claude_sentence_detector.json
 eval
 build
 tests

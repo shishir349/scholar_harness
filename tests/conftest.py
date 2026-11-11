@@ -6,6 +6,7 @@ def _no_skeleton_file(monkeypatch):
     """Tests never read data/human_skeletons.json by accident; the ones that want skeletons pass Deps(skeletons=[...])."""
     monkeypatch.setenv("HARNESS_SKELETONS", "off")
     monkeypatch.setenv("HARNESS_SHAPE", "off")        # fixtures are one-sentence paragraphs; the shape repairs are tested directly
+    monkeypatch.setenv("HARNESS_DETECTOR", "off")     # the shipped Claude-style detector would add spans to fixtures built to be flat; its tests pass a model
     monkeypatch.setenv("HARNESS_LAMP", "off")        # the LAMP tests switch it on; other fixtures are flat by construction
 
 

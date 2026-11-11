@@ -1,16 +1,18 @@
-"""Offline verification of the free repairs and the local surprisal scorer. No API calls.
+"""Offline verification of the free repairs and the local Claude-style detector. No API calls.
 
-    python scripts/offline_benchmark.py [--text eval/fixtures/section_2_1.txt] [--human 60]
+    python scripts/offline_benchmark.py [--text eval/fixtures/section_2_1.txt] [--before-skeletons old.json]
 
-Prints: (1) skeleton counts, (2) the deterministic cleanup on the flagged section, (3) surprisal on it vs real human paragraphs."""
+Prints: (1) skeleton counts, (2) the deterministic cleanup on the flagged section (long sentences, narrative citations),
+(3) the sentence detector on held-out human thesis sentences and held-out Claude text, with latency."""
 import argparse
 import json
 import re
-import statistics
 import sys
 import time
 from collections import Counter
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -18,10 +20,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from harness import limits  # noqa: E402
+from harness import graph, limits  # noqa: E402
 from harness.text import cleanup as C, protect  # noqa: E402
 from harness.text.sentences import split_sentences  # noqa: E402
-from harness.validate import constraints as K, surprisal  # noqa: E402
+from harness.validate import constraints as K, detector  # noqa: E402
 
 
 def skeleton_counts(path):
@@ -36,79 +38,77 @@ def blocks(text):
     return {"open": "\n\n".join(paras[:2]), "mid": paras[2], "close": paras[3]}
 
 
-def n_paras(chunks):
-    return sum(len(C.paras(v)) for v in chunks.values())
-
-
 def n_long(chunks):
     return sum(1 for v in chunks.values() for s in split_sentences(v) if len(s.split()) > limits.MAX_SENT)
+
+
+def auc(pos, neg):
+    """P(a Claude sentence scores above a human one), ties half."""
+    pos, neg = np.asarray(pos), np.asarray(neg)
+    return float(((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (len(pos) * len(neg)))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", default=str(ROOT / "eval" / "fixtures" / "section_2_1.txt"))
-    ap.add_argument("--human", type=int, default=60)
     ap.add_argument("--before-skeletons", default="")
     a = ap.parse_args()
     text = Path(a.text).read_text(encoding="utf-8")
     chunks = blocks(text)
-    n_sent = sum(len(split_sentences(v)) for v in chunks.values())
 
     print("== 1. skeletons (data/human_skeletons.json)")
     if a.before_skeletons:
         print("   before: total %d, buckets %d, smallest bucket %d, with a micro-paragraph %d" % skeleton_counts(a.before_skeletons))
     print("   now:    total %d, buckets %d, smallest bucket %d, with a micro-paragraph %d" % skeleton_counts(ROOT / "data" / "human_skeletons.json"))
 
-    print("\n== 2. deterministic cleanup on the flagged section (%d sentences, %d words)" % (n_sent, len(text.split())))
-    stress = {"open": "\n\n".join(s for s in split_sentences(chunks["open"])), "mid": "\n\n".join(split_sentences(chunks["mid"])),
-              "close": "\n\n".join(split_sentences(chunks["close"]))}
-    merged = C.merge_short_paragraphs(chunks)
-    print("   paragraphs: as extracted %d -> %d after merge_short_paragraphs (the PDF keeps 4 blocks; GPTZero's export drops the real breaks)" % (n_paras(chunks), n_paras(merged)))
-    print("   stress test, one paragraph per sentence: %d -> %d after merge_short_paragraphs (cap %d words)" % (n_paras(stress), n_paras(C.merge_short_paragraphs(stress)), C.MAX_MERGED_WORDS))
+    print("\n== 2. deterministic cleanup on the flagged section (%d sentences, %d words)" % (sum(len(split_sentences(v)) for v in chunks.values()), len(text.split())))
+    print("   sentences over %d words: %d -> %d with split_long;  %d -> %d through the pipeline's own _split_long (drop_micro, split_long, limit_narrative)"
+          % (limits.MAX_SENT, n_long(chunks), n_long(C.split_long(chunks, limits.MAX_SENT)), n_long(chunks), n_long(graph._split_long(chunks))))
     before = K.section_violations(chunks)
-    print("   narrative / parenthetical citations before: %d / %.0f%% parenthetical" % (before["narrative_section"], 100 * before["paren_share"]))
-    for label, src in (("limit_narrative (per call %d, section %d)" % (limits.NARR_CALL, limits.NARR_SECTION), chunks),
-                       ("drop_repeats, then limit_narrative", C.drop_repeats(chunks, [])[0])):
-        for sec in (limits.NARR_SECTION, 4):
-            out = C.limit_narrative(src, per_section=sec)
-            v = K.section_violations(out)
-            safe = protect.compare(" ".join(chunks.values()), " ".join(out.values())) == [] or "drop_repeats" in label
-            print("     %-44s section limit %d -> narrative %2d, parenthetical %3.0f%%, sentences %d, citations/numbers kept: %s"
-                  % (label, sec, v["narrative_section"], 100 * v["paren_share"], sum(len(split_sentences(x)) for x in out.values()), safe))
-    print("   sentences over %d words: %d -> %d after split_long" % (limits.MAX_SENT, n_long(chunks), n_long(C.split_long(chunks, limits.MAX_SENT))))
+    print("   narrative citations before: %d (%.0f%% of citations parenthetical)" % (before["narrative_section"], 100 * before["paren_share"]))
+    for label, src in (("limit_narrative", chunks), ("drop_repeats, then limit_narrative", C.drop_repeats(chunks, [])[0])):
+        out = C.limit_narrative(src)
+        v = K.section_violations(out)
+        clean = protect.compare(" ".join(chunks.values()), " ".join(out.values())) == [] or "drop_repeats" in label
+        print("     %-36s -> narrative %2d (gate %d), parenthetical %3.0f%%, %d sentences, citations/numbers kept: %s, 'A study' lead-ins: %d"
+              % (label, v["narrative_section"], limits.NARR_SECTION, 100 * v["paren_share"], sum(len(split_sentences(x)) for x in out.values()), clean,
+                 sum(x.count("A study (") for x in out.values())))
+    print("     what no safe pattern covers stays narrative and is queued for LAMP (narrative_surplus)")
 
-    print("\n== 3. surprisal (distilgpt2 int8, masked tokens) on the flagged section vs %d human paragraphs of data/corpus.db" % a.human)
-    sc = surprisal.get_scorer()
-    if sc is None:
-        print("   no scorer (model files or onnxruntime missing)")
+    print("\n== 3. detector (data/claude_sentence_detector.json) on HELD-OUT sentences")
+    model = detector.load()
+    if model is None:
+        print("   no model: run python scripts/train_sentence_detector.py")
         return 0
-    import calibrate_surprisal as cal
+    import train_sentence_detector as T
+    hum = T.human_sentences(3000, 7)["test"]
+    ai = T.ai_sentences()
+    thr = model["threshold"]
+    ph = np.array([detector.score_sentence(s, model)["ai_prob"] for s in hum])
+    print("   held-out human: %d sentences from theses the model never saw; Claude: topics fx06 + the two flagged sections (not trained on)" % len(hum))
+    allp = []
+    for g in ("fx06", "gptzero_2_1", "live_3_1"):
+        p = np.array([detector.score_sentence(s, model)["ai_prob"] for s in ai[g]])
+        allp += list(p)
+        print("   %-12s %4d sentences  flagged %5.1f%%  mean ai_prob %.2f  AUC vs held-out human %.3f" % (g, len(p), 100 * (p >= thr).mean(), p.mean(), auc(p, ph)))
+    allp = np.array(allp)
+    print("   threshold %.3f (chosen on a separate validation split for <=10%% human false positives)" % thr)
+    print("   ALL held-out Claude: flagged %.1f%%   AUC %.3f   |   held-out human: flagged %.1f%%, mean ai_prob %.2f"
+          % (100 * (allp >= thr).mean(), auc(allp, ph), 100 * (ph >= thr).mean(), ph.mean()))
+    rows = detector.score_text(text, model)
+    big = [r for r in rows if len(r["text"].split()) >= detector.MIN_WORDS]
+    print("   flagged section (%d sentences >= %d words): %d flagged (%.0f%%); top culprit phrases:" % (len(big), detector.MIN_WORDS, sum(r["flagged"] for r in big), 100 * sum(r["flagged"] for r in big) / len(big)))
+    seen = Counter(c for r in big if r["flagged"] for c in r["culprit_phrases"])
+    for c, n in seen.most_common(10):
+        print("     %2dx  %s" % (n, c))
+    sec = text
     t = time.perf_counter()
-    surprisal.clear_cache()
-    r = surprisal.score_section_surprisal(text, sc)
-    cold = (time.perf_counter() - t) * 1000
-    t = time.perf_counter()
-    surprisal.score_section_surprisal(text, sc)
-    cached = (time.perf_counter() - t) * 1000
-    human, n_par = cal.human_sentences(sc, a.human, 7)
-    ai = [s for s in r["sentences"] if s["n"] >= surprisal.MIN_TOKENS]
-    tm, tw = r["threshold"]["mean"], r["threshold"]["window"]
-    hflag = sum(1 for s in human if s["mean"] < tm or s["min_window"] < tw)
-    med = statistics.median
-    print("   shipped thresholds: mean < %.2f or 6-token window < %.2f nats/token" % (tm, tw))
-    print("   %-26s %12s %12s" % ("", "flagged text", "human corpus"))
-    print("   %-26s %12.2f %12.2f" % ("masked_mean_surprisal (med)", med(s["mean"] for s in ai), med(s["mean"] for s in human)))
-    print("   %-26s %12.2f %12.2f" % ("min_window_surprisal (med)", med(s["min_window"] for s in ai), med(s["min_window"] for s in human)))
-    print("   %-26s %12.2f %12.2f" % ("lstr, top-5 share (med)", med(s["lstr"] for s in ai), med(s["lstr"] for s in human)))
-    print("   %-26s %9d/%d %9d/%d  (%.0f%% / %.0f%%)" % ("sentences flagged", len(r["low"]), len(r["sentences"]), hflag, len(human), 100 * len(r["low"]) / len(r["sentences"]), 100 * hflag / len(human)))
-    for want in (0.5, 0.65):
-        best = min(((sum(1 for s in human if s["mean"] < m or s["min_window"] < w) / len(human), m, w) for m in [x / 20 for x in range(30, 140)] for w in [x / 20 for x in range(10, 120)]
-                    if sum(1 for s in ai if s["mean"] < m or s["min_window"] < w) / len(ai) >= want), default=None)
-        print("   to flag %d%% of the flagged text's sentences a threshold must also flag %.0f%% of human sentences (mean<%.2f, window<%.2f)" % (100 * want, 100 * best[0], best[1], best[2]))
-    print("   top 10 predictable spans of the flagged text (lowest window first):")
-    for s in sorted(ai, key=lambda s: s["min_window"])[:10]:
-        print("     %.2f  %s" % (s["min_window"], s["predictable_span"]))
-    print("   latency, %d words: %.0f ms cold (all %d tokens through the model), %.0f ms when every paragraph is cached" % (len(text.split()), cold, r["n_tokens"], cached))
+    for _ in range(50):
+        detector.score_text(sec, model)
+    ms = (time.perf_counter() - t) * 1000 / 50
+    print("   latency: %.2f ms for the whole %d-word section (%d sentences), %.3f ms per sentence; model file %d KB, runtime dependencies: none"
+          % (ms, len(text.split()), len(rows), ms / len(rows), (ROOT / "data" / "claude_sentence_detector.json").stat().st_size // 1024))
+    print("   caveat: human = text extracted from thesis PDFs, Claude = our generated chapters, so some of the separation is genre/format, not authorship")
     return 0
 
 

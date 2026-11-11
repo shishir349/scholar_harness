@@ -18,6 +18,8 @@ dependencies = [
 # corpus build only (PyMuPDF is AGPL: never part of the runtime image)
 corpus = ["pymupdf4llm==1.28.2"]
 dev = ["pytest==9.1.1"]
+# only scripts/train_sentence_detector.py (the runtime detector is pure Python)
+train = ["scikit-learn"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
